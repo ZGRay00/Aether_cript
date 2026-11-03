@@ -1,0 +1,16 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
+const root = path.resolve(__dirname, '..');
+const source = path.join(root, 'Aether自动助手.user.js');
+const release = path.join(root, 'aether-auto-helper.user.js');
+const content = fs.readFileSync(source);
+const text = content.toString('utf8');
+const metadata = text.match(/^\/\/ @version\s+(\S+)\s*$/m)?.[1];
+assert.ok(metadata && /^\d+\.\d+\.\d+$/.test(metadata), 'Invalid metadata version');
+assert.equal(text.match(/const VERSION = '([^']+)'/)?.[1], metadata, 'Version mismatch');
+execFileSync(process.execPath, ['--check', source], { stdio: 'inherit' });
+if (process.argv.includes('--check')) assert.ok(content.equals(fs.readFileSync(release)), 'Release differs from source');
+else fs.writeFileSync(release, content);
+console.log(`Aether v${metadata}: source and release verified`);
