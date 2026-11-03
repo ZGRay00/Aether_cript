@@ -1,4 +1,6 @@
-# Aether 自动助手 2.1.2
+# Aether 自动助手 2.2.0
+
+2.2.0 将“检查更新”移到面板顶部，所有标签页均可直接点击；手机窄屏下采用紧凑标题布局。已通过 9 项更新专项检查及桌面、390px、320px 下共 18 项标签页顶部布局检查。
 
 脚本文件：`Aether自动助手.user.js`。将新版内容更新到脚本管理器中，刷新游戏页面后使用。
 
@@ -6,7 +8,7 @@
 
 首次从 [GitHub Raw](https://raw.githubusercontent.com/ZGRay00/Aether_cript/main/aether-auto-helper.user.js) 或 [jsDelivr](https://cdn.jsdelivr.net/gh/ZGRay00/Aether_cript@main/aether-auto-helper.user.js) 安装。已安装旧版需先手动覆盖一次，脚本名称和命名空间保持不变。
 
-之后在“策略 → 脚本更新”点击“检查更新”。与红叶镇相同，助手并行检查四个可信源，校验脚本身份并选择最高版本，再打开油猴更新确认页；不在后台静默安装。允许弹出窗口，确认安装后刷新游戏页面，按角色保存的配置保留。推送到 main 后 GitHub Actions 会刷新 jsDelivr 缓存；缓存未同步时仍比较 GitHub Raw 的最新版本。
+之后在面板顶部点击“检查更新”。与红叶镇相同，助手并行检查四个可信源，校验脚本身份并选择最高版本，再打开油猴更新确认页；不在后台静默安装。允许弹出窗口，确认安装后刷新游戏页面，按角色保存的配置保留。推送到 main 后 GitHub Actions 会刷新 jsDelivr 缓存；缓存未同步时仍比较 GitHub Raw 的最新版本。
 
 ## 界面
 

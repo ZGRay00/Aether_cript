@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.1.2
+// @version      2.2.0
 // @description  Aether 图形控制台：高收益日常、地下城接管与探索、背包分解预览与有限强化；角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.1.2';
+    const VERSION = '2.2.0';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -470,7 +470,9 @@
 #aether-auto-helper-panel .ah-list{max-height:260px;overflow:auto;scrollbar-width:thin;display:flex;flex-direction:column;gap:5px}#aether-auto-helper-panel .ah-item{display:flex;align-items:center;gap:9px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#101b2a;cursor:pointer}#aether-auto-helper-panel .ah-item:has(input:checked){border-color:#62e0d180;background:#62e0d10a}#aether-auto-helper-panel .ah-item-copy{min-width:0;flex:1;overflow-wrap:anywhere;font-size:12px}#aether-auto-helper-panel .ah-item small{display:block;color:var(--muted);font-size:10px}#aether-auto-helper-panel .ah-item-badge{font-size:10px;color:var(--muted);flex:none}#aether-auto-helper-panel .ah-empty{padding:18px 10px;text-align:center;color:var(--muted);font-size:12px}#aether-auto-helper-panel .ah-empty svg{width:26px;height:26px;opacity:.6;margin-bottom:6px}
 #aether-auto-helper-panel .ah-logs{display:flex;flex-direction:column;gap:7px}#aether-auto-helper-panel .ah-log-line{border-left:2px solid #39506a;padding:8px 9px;background:#142031;border-radius:0 7px 7px 0;overflow-wrap:anywhere;white-space:pre-wrap;font-size:11px;color:#c5d5e5}#aether-auto-helper-panel .ah-log-line.success{border-color:var(--cyan)}#aether-auto-helper-panel .ah-log-line.warn{border-color:var(--orange)}#aether-auto-helper-panel .ah-log-line.error{border-color:var(--red)}#aether-auto-helper-panel .ah-log-line time{color:var(--muted);font-size:10px;margin-right:8px}#aether-auto-helper-panel .ah-foot{display:flex;align-items:center;gap:8px;flex:none;padding:10px 16px;border-top:1px solid var(--line);background:#0c1420;color:var(--muted);font-size:10px}#aether-auto-helper-panel .ah-foot>span:first-child{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#aether-auto-helper-panel .ah-time{font-variant-numeric:tabular-nums}
 #aether-auto-helper-panel.ah-collapsed{width:52px!important;height:52px!important;border-radius:17px;min-height:0;max-height:52px}#aether-auto-helper-panel.ah-collapsed .ah-head,#aether-auto-helper-panel.ah-collapsed .ah-status,#aether-auto-helper-panel.ah-collapsed .ah-tabs,#aether-auto-helper-panel.ah-collapsed .ah-content,#aether-auto-helper-panel.ah-collapsed .ah-foot{display:none}#aether-auto-helper-panel .ah-launcher{display:none;background:none;border:0;width:100%;height:100%;color:var(--cyan);touch-action:none}#aether-auto-helper-panel.ah-collapsed .ah-launcher{display:grid;place-items:center}#aether-auto-helper-panel .ah-launcher svg{width:27px;height:27px}
+#aether-auto-helper-panel .ah-update-btn{flex:none;padding:7px 8px;min-height:32px;font-size:11px;color:var(--cyan);white-space:nowrap}
 @media(max-width:520px){#aether-auto-helper-panel{right:10px;bottom:76px;width:calc(100vw - 20px);max-width:calc(100vw - 20px);max-height:calc(100dvh - 100px);border-radius:16px}#aether-auto-helper-panel .ah-head{padding:12px 14px 10px}#aether-auto-helper-panel .ah-content{padding:12px}#aether-auto-helper-panel .ah-card{padding:12px}#aether-auto-helper-panel .ah-tab{padding-top:8px;padding-bottom:9px}#aether-auto-helper-panel .ah-hero-title{font-size:18px}}
+@media(max-width:520px){#aether-auto-helper-panel .ah-head{gap:6px}#aether-auto-helper-panel .ah-emblem{width:30px;height:30px}#aether-auto-helper-panel .ah-brand strong{display:block;font-size:14px;letter-spacing:2px}#aether-auto-helper-panel .ah-version{display:inline-block;margin-left:0;vertical-align:baseline}#aether-auto-helper-panel .ah-brand small{display:none}}
 @media(prefers-reduced-motion:reduce){#aether-auto-helper-panel *{transition:none!important}}
 `;
     document.head.appendChild(style);
@@ -481,7 +483,10 @@
     const brand = el('div', 'ah-brand'); brand.append(el('strong', '', 'AETHER'), el('span', 'ah-version', VERSION), el('small', '', '自动助手 / AUTOMATION'));
     const stopBtn = el('button', 'ah-icon-btn ah-stop'); stopBtn.appendChild(icon('stop')); stopBtn.title = '停止当前任务'; stopBtn.setAttribute('aria-label', stopBtn.title); stopBtn.disabled = true;
     const collapseBtn = el('button', 'ah-icon-btn'); collapseBtn.appendChild(icon('minus')); collapseBtn.setAttribute('aria-label', '收起助手');
-    header.append(emblem, brand, stopBtn, collapseBtn);
+    const updateBtn = el('button', 'ah-btn ah-update-btn', '检查更新');
+    updateBtn.title = '检查新版本并打开油猴安装确认页';
+    updateBtn.setAttribute('aria-label', '检查脚本更新');
+    header.append(emblem, brand, updateBtn, stopBtn, collapseBtn);
     const statusBar = el('div', 'ah-status');
     const statusLine = el('span', 'ah-status-text', '就绪'); statusLine.setAttribute('role', 'status');
     const characterLabel = el('span', 'ah-character', '未选择角色');
@@ -2827,9 +2832,6 @@
         ui.sweepInfo.textContent = '配置已导入，请重新查询扫荡额度。';
         ui.routeKey = ''; renderDashboard();
     }
-
-    const updateCard = card(ui.pages.settings, '脚本更新', 'refresh', '并行检查 GitHub Raw 与 jsDelivr，选择最高版本后打开油猴安装确认页。安装后刷新游戏页面生效，角色配置保留。');
-    const updateBtn = button(row(updateCard), '检查更新', null, checkForUpdates);
 
     // ---------- 更新检查 ----------
     let checkingUpdate = false;
