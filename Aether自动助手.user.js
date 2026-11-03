@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.2.2
+// @version      2.2.3
 // @description  Aether 图形控制台：高收益日常、地下城接管与探索、背包分解预览与有限强化；角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.2.2';
+    const VERSION = '2.2.3';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -36,6 +36,7 @@
         battleMaxWait: 600,     // 战斗等待上限；地下城到期先尝试加速，成功后重新等待结算（秒）
         publicLobbyPollSeconds: 5, // 公开大厅等待满员时的查询间隔，可随时停止
         dungeonMaxRestarts: 30, // 望雪台未刷到策略目标时撤离重开的单批次数上限
+        donationMaxWait: 600,   // 单独共享捐献每次冷却最多等待 10 分钟；日常不等待
     };
     /****************** 配置区结束 ******************/
 
@@ -2321,11 +2322,11 @@
         if (![required, contributed].every(n => Number.isSafeInteger(n) && n >= 0)) throw new Error('建筑贡献进度异常');
         return { building, item, remaining: Math.max(0, required - contributed), finished: item.is_complete === true || contributed >= required };
     }
-    async function doDonation() {
+    async function doDonation({ waitForCooldown = true } = {}) {
         const policy = { ...taskSettings() }, shared = policy.donationType === 'shared';
         if (!policy.donationBuilding || !policy.donationItem || !policy.donationLevel) throw new Error('请先加载建筑并选择材料及目标等级');
         const times = shared ? policy.donationTimes : 1;
-        let completed = 0, expiredCooldownReads = 0;
+        let completed = 0, expiredCooldownReads = 0, cooldownDeadline = null;
         while (completed < times) {
             checkStop();
             const snapshot = await loadDonationData();
@@ -2334,26 +2335,41 @@
                 log(`捐献已停止：所选材料需求已完成或建筑已离开目标 Lv.${policy.donationLevel}，本次成功 ${completed} 次`); return;
             }
             const { building, item, remaining } = selected;
+            // 等待前就检查库存，避免没有材料仍占用任务锁。
+            const owned = donationStock(snapshot.status, item.item_id);
+            const quantity = shared ? null : Math.min(policy.donationQuantity, remaining);
+            if (owned < (quantity ?? 1)) throw new Error(`「${item.name || item.item_id}」库存不足：现有 ${owned}${quantity != null ? `，本次需要 ${quantity}` : ''}；已停止捐献`);
             if (shared) {
                 const cooldown = building.shared_cooldown;
                 if (!cooldown || typeof cooldown.can_contribute !== 'boolean') throw new Error('无法确认共享材料冷却状态，已停止');
                 if (!cooldown.can_contribute) {
+                    if (!waitForCooldown) {
+                        log(`自动捐献：共享材料处于冷却，本批已完成 ${completed}/${times} 次；日常不等待，可稍后单独启动捐献`);
+                        return;
+                    }
                     const until = cooldown.next_available_at;
                     if (!Number.isFinite(until) || until <= 0) throw new Error('共享材料冷却时间异常，请刷新游戏后再试');
-                    const remainingSeconds = until - Date.now() / 1000;
+                    const now = Date.now() / 1000, remainingSeconds = until - now;
+                    if (remainingSeconds > CONFIG.donationMaxWait) throw new Error(`共享捐献冷却超过 ${CONFIG.donationMaxWait / 60} 分钟等待上限，已结束本批，请稍后再启动`);
+                    // 首次观察时固定期限，之后的报价不能不断延长；给到期状态留 8 秒同步余量。
+                    const firstWait = cooldownDeadline == null;
+                    cooldownDeadline ??= now + Math.min(CONFIG.donationMaxWait, Math.max(0, remainingSeconds) + 8);
+                    const budget = cooldownDeadline - now;
+                    if (budget <= 0) throw new Error('共享捐献冷却等待超时，已结束本批，请刷新游戏后再启动');
                     if (remainingSeconds <= 0 && ++expiredCooldownReads > 3) throw new Error('共享材料冷却已到期但服务器仍不允许贡献，已暂停');
                     if (remainingSeconds > 0) expiredCooldownReads = 0;
                     // 分段等待，定期重新检查需求；停止按钮可立即中断等待。
-                    const seconds = remainingSeconds <= 0 ? 2 : Math.min(60, Math.ceil(remainingSeconds) + 1);
-                    setProgress(completed, times, `共享捐献冷却中 · ${building.name || building.building_id}`);
+                    const seconds = Math.min(budget, remainingSeconds <= 0 ? 2 : Math.min(60, Math.ceil(remainingSeconds) + 1));
+                    if (firstWait) {
+                        log(`共享捐献：等待冷却约 ${Math.max(0, Math.ceil(remainingSeconds))} 秒，可随时停止；本次最多再等 ${Math.ceil(budget)} 秒`);
+                    }
+                    setProgress(completed, times, `共享捐献冷却 · 剩余约 ${Math.max(0, Math.ceil(remainingSeconds))}s · ${building.name || building.building_id}`);
                     await waitSeconds(seconds);
                     continue;
                 }
                 expiredCooldownReads = 0;
+                cooldownDeadline = null;
             }
-            const owned = donationStock(snapshot.status, item.item_id);
-            const quantity = shared ? null : Math.min(policy.donationQuantity, remaining);
-            if (owned < (quantity ?? 1)) throw new Error(`「${item.name || item.item_id}」库存不足：现有 ${owned}${quantity != null ? `，本次需要 ${quantity}` : ''}；已停止捐献`);
             if (!shared && quantity < policy.donationQuantity) log(`所选需求只剩 ${remaining} 件，本次捐献 ${quantity} 件`);
             setProgress(completed, times, `捐献 ${item.name || item.item_id} · ${shared ? `第 ${completed + 1}/${times} 次` : `${quantity} 件`}`);
             const path = `/building/${encodeURIComponent(building.building_id)}/contribute/${policy.donationType}`;
@@ -2390,7 +2406,7 @@
             if (!policy.donationBuilding || !policy.donationItem || !policy.donationLevel) {
                 log('自动捐献：尚未配置建筑、材料及目标等级，本次跳过'); return;
             }
-            await doDonation();
+            await doDonation({ waitForCooldown: false });
         }]);
         for (let i = 0; i < steps.length; i++) {
             checkStop(); const [name, fn] = steps[i]; setProgress(i, steps.length, name);
@@ -2538,7 +2554,7 @@
         if (runningTask) return;
         selectDonationLevel(); renderDonationSettings();
     }); donationLevelBtn.dataset.lockTask = '1';
-    donationCard.appendChild(el('div', 'ah-sub', '仅向选定等级投入，需求完成或建筑升级后停止。个人物品库存不足时停止，需求不足时只补缺口；共享材料每次扣量由游戏决定，不等于贡献次数。默认随一键日常执行一批，未配置时跳过；也可单独启动，可随时停止。'));
+    donationCard.appendChild(el('div', 'ah-sub', '仅向选定等级投入，需求完成或建筑升级后停止。库存不足时停止，个人物品需求不足时只补缺口；共享材料每次扣量由游戏决定。一键日常遇到共享冷却就结束本批；单独启动每次冷却最多等待 10 分钟，可随时停止。未配置时日常跳过。'));
     function selectDonationLevel() {
         const building = donationBuildings.find(b => String(b.building_id) === settings.donationBuilding);
         setSetting('donationLevel', building?.next_upgrade?.target_level || 0);
@@ -2584,7 +2600,7 @@
         donationNote.textContent = `保存的目标：${settings.donationLevel ? `Lv.${settings.donationLevel}` : '未选择'} · ${shared ? '共享进度' : '个人进度'} ${amount}`;
         if (upgrade && upgrade.target_level !== settings.donationLevel) donationNote.textContent += '。目标等级不一致，请点击“采用当前目标等级”后重新选择材料。';
         if (shared && building?.shared_cooldown?.can_contribute === false) {
-            donationNote.textContent += '。当前处于冷却中，启动后等待并复查。';
+            donationNote.textContent += '。当前处于冷却中：日常跳过，单独启动最多等待 10 分钟并复查。';
         }
     }
     renderDonationSettings();
