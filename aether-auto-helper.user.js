@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.2.3
+// @version      2.3.0
 // @description  Aether 图形控制台：高收益日常、地下城接管与探索、背包分解预览与有限强化；角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.2.3';
+    const VERSION = '2.3.0';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -106,14 +106,18 @@
     function writeStorage(key, value) {
         try { localStorage.setItem(key, JSON.stringify(value)); } catch (_) { /* 存储不可用时保留本次配置 */ }
     }
-    function loadSettings(character = getCharacter()) {
+    function readCharacterSettings(character) {
         const saved = readStorage(`aether-helper-v2:${character}`, {});
-        settings = Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([key, value]) =>
+        const values = Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([key, value]) =>
             [key, normalizeSetting(key, saved && typeof saved === 'object' && Object.hasOwn(saved, key) ? saved[key] : value)]));
         // 旧版只有一组营地设置：未单独配置 Boss 营地的项继承旧值，之后独立保存。
         for (const [next, previous] of [['bossCampMode', 'campMode'], ['bossCampSeconds', 'campSeconds'], ['bossCampTarget', 'campTarget']]) {
-            if (saved && typeof saved === 'object' && !Object.hasOwn(saved, next) && Object.hasOwn(saved, previous)) settings[next] = settings[previous];
+            if (saved && typeof saved === 'object' && !Object.hasOwn(saved, next) && Object.hasOwn(saved, previous)) values[next] = values[previous];
         }
+        return values;
+    }
+    function loadSettings(character = getCharacter()) {
+        settings = readCharacterSettings(character);
         settingsCharacter = character;
         preferredFriends.clear();
         if (Array.isArray(settings.friends)) settings.friends.slice(0, 2).forEach((x) => preferredFriends.add(String(x)));
@@ -238,7 +242,7 @@
     function isRestartError(e) { return e?.restart === true; }
     function checkStop(ctx = activeTaskContext) {
         if (ctx?.controller.signal.aborted) throw ctx.stopError;
-        if (ctx?.character && ctx.character !== getCharacter()) {
+        if (ctx?.character && (ctx.pageCharacter ?? ctx.character) !== getCharacter()) {
             ctx.stopError.message = '角色已切换，当前任务已停止；已发送的操作需回查游戏状态';
             ctx.controller.abort(ctx.stopError);
             throw ctx.stopError;
@@ -354,6 +358,10 @@
     }
     function observeResponse(path, response) {
         const base = path.split('?')[0];
+        if (base === '/status' && activeTaskContext?.batchCharacter && response.data?.username !== activeTaskContext.character) {
+            const error = new Error('返回的角色身份与队列目标不一致，已停止整批任务');
+            error.fatal = true; throw error;
+        }
         if (base === '/status') runtime.status = response.data;
         if (base === '/dungeon/current') runtime.dungeon = response.data || null;
         if (base === '/dungeon/node') {
@@ -546,6 +554,7 @@
     }
     bindDrag(header); bindDrag(launcher); window.addEventListener('resize', constrainPanel);
     function log(message, type = 'info') {
+        if (activeTaskContext?.batchCharacter) message = `[@${activeTaskContext.character}] ${message}`;
         const record = { message: String(message), type, at: Date.now() };
         runtime.logs.unshift(record); if (runtime.logs.length > 200) runtime.logs.length = 200;
         footerText.textContent = record.message; footerText.title = record.message;
@@ -561,7 +570,7 @@
         if (!ui.ready) return;
         panel.dataset.outcome = runtime.outcome;
         statusLine.textContent = runningTask ? `${runningTask} · ${runtime.phase}` : runtime.phase;
-        characterLabel.textContent = getCharacter() || '未选择角色';
+        characterLabel.textContent = activeTaskContext?.character || getCharacter() || '未选择角色';
         const elapsed = runtime.startedAt ? Math.max(0, ((runtime.endedAt || Date.now()) - runtime.startedAt) / 1000) : 0;
         timeLabel.textContent = formatDuration(elapsed);
         const waiting = Math.max(0, Math.ceil((runtime.waitUntil - Date.now()) / 1000));
@@ -667,7 +676,7 @@
     }
 
     // 任务互斥执行包装：同一时间只跑一个任务
-    async function runTask(name, fn) {
+    async function runTask(name, fn, { batch = false } = {}) {
         if (runningTask) { log(`「${runningTask}」执行中，请等待或停止`, 'warn'); return; }
         reconcileCharacter();
         const character = getCharacter();
@@ -683,14 +692,16 @@
             progress: 0, total: 0, outcome: 'running', ...newCounters() });
         setBusy(true); renderDashboard();
         try {
-            await withCharacterLock(character, async () => {
+            const execute = async () => {
                 checkStop(ctx); await fn(); checkStop(ctx);
-                if (ctx.settings.sync) {
+                if (!batch && ctx.settings.sync) {
                     try { await refreshGameState(); }
                     catch (e) { rethrowIfStopped(e); markIssue(`角色数据同步失败：${e.message}`); }
                 }
                 checkStop(ctx);
-            });
+            };
+            if (batch) await execute();
+            else await withCharacterLock(character, execute);
             runtime.outcome = runtime.issues ? 'partial' : 'success';
             runtime.phase = runtime.issues ? `处理结束 · ${runtime.issues} 项需留意` : '任务完成';
             log(`「${name}」${runtime.issues ? '处理结束，详情见日志' : '完成'}`, runtime.issues ? 'warn' : 'success');
@@ -2416,6 +2427,95 @@
     }
 
 
+    // ---------- 多角色队列：通过请求角色参数切换目标，前台角色保持一致 ----------
+    const characterBatch = { characters: [], selected: new Set(), results: [], daily: true, dungeon: false, donation: false };
+    function accountCharacters(data) {
+        const list = data?.characters;
+        if (!Array.isArray(list) || list.some(c => !c || typeof c.username !== 'string' || !c.username.trim() || c.username !== c.username.trim()) ||
+            new Set(list.map(c => c.username)).size !== list.length) throw new Error('已绑定角色列表异常，请重新加载');
+        return list.map(c => ({ username: c.username, name: typeof c.name === 'string' ? c.name : c.username }));
+    }
+    async function loadBatchCharacters() {
+        characterBatch.characters = [];
+        renderCharacterBatch();
+        const list = accountCharacters((await api('/account')).data);
+        characterBatch.characters = list;
+        characterBatch.selected = new Set([...characterBatch.selected].filter(key => list.some(c => c.username === key)));
+        renderCharacterBatch();
+        log(`已加载 ${list.length} 个绑定角色，请勾选本批角色和任务`);
+    }
+    async function executeCharacterBatch() {
+        const root = activeTaskContext;
+        const modes = { daily: characterBatch.daily, dungeon: characterBatch.dungeon, donation: characterBatch.donation };
+        const queue = characterBatch.characters.filter(c => characterBatch.selected.has(c.username))
+            .map(c => ({ ...c, policy: readCharacterSettings(c.username), outcome: 'pending', detail: '等待执行', steps: [] }));
+        if (!queue.length) throw new Error('请先加载并勾选已绑定角色');
+        if (!Object.values(modes).some(Boolean)) throw new Error('请至少选择一种批量任务');
+        characterBatch.results = queue;
+        renderCharacterBatch();
+        const original = { status: runtime.status, dungeon: runtime.dungeon, presets: runtime.presets, explorationAllowance: runtime.explorationAllowance };
+        const originalCatalogs = { dailyShopCatalog, donationBuildings, donationStatus };
+        const totals = newCounters();
+        try {
+            for (const item of queue) {
+                checkStop(root);
+                item.outcome = 'running'; item.detail = '正在核对角色'; renderCharacterBatch();
+                const child = { ...root, character: item.username, pageCharacter: root.character, batchCharacter: true,
+                    settings: item.policy, dungeonId: null, nodeIndex: null, leaderId: null, accelUsed: 0 };
+                Object.assign(runtime, { status: null, dungeon: null, presets: [], explorationAllowance: null, ...newCounters() });
+                dailyShopCatalog = []; donationBuildings = []; donationStatus = null;
+                try {
+                    // 复查绑定关系后才设置目标上下文；角色锁在所有读写结束前一直持有。
+                    const allowed = accountCharacters((await api('/account')).data);
+                    if (!allowed.some(c => c.username === item.username)) {
+                        const error = new Error(`角色 @${item.username} 已不在当前登录账户中，已停止整批任务`);
+                        error.fatal = true; throw error;
+                    }
+                    activeTaskContext = child;
+                    await withCharacterLock(item.username, async () => {
+                        await api('/status'); // observeResponse 严格确认 username，失败时不写入。
+                        const policy = child.settings, steps = [];
+                        if (modes.daily) steps.push(['日常', () => doDailyAll(policy.sweepPreset, policy.sweepTimes, policy.dailySweep)]);
+                        if (modes.dungeon) steps.push(['探索', async () => {
+                            if (!policy.dungeonPreset) throw new Error('该角色未保存探索副本，请切换到该角色配置后再运行');
+                            await loadPresets();
+                            await doDungeonRuns(policy.dungeonPreset, policy.visibility, policy.difficulty, policy.runs);
+                        }]);
+                        if (modes.donation && !(modes.daily && policy.dailyDonation)) steps.push(['捐献', () => doDonation({ waitForCooldown: false })]);
+                        for (const [name, action] of steps) {
+                            checkStop(child);
+                            item.detail = `正在执行${name}`; renderCharacterBatch();
+                            const before = runtime.issues;
+                            await action(); checkStop(child);
+                            item.steps.push(`${name}${runtime.issues > before ? '有警告' : '已处理'}`);
+                        }
+                        item.outcome = runtime.issues ? 'partial' : 'success';
+                        item.detail = item.steps.join(' · ');
+                    });
+                } catch (error) {
+                    item.outcome = isStopError(error) ? 'stopped' : 'error'; item.detail = error.message;
+                    runtime.issues++;
+                    log(`角色任务结束：${error.message}`, isStopError(error) ? 'warn' : 'error');
+                    // 停止、登录失效、身份变化及结果不确定必须终止整批，普通错误仅结束本角色。
+                    rethrowIfStopped(error);
+                } finally {
+                    item.counters = Object.fromEntries(Object.keys(totals).map(key => [key, runtime[key]]));
+                    for (const key of Object.keys(totals)) totals[key] += runtime[key];
+                    activeTaskContext = root;
+                    renderCharacterBatch();
+                }
+            }
+        } finally {
+            activeTaskContext = root;
+            Object.assign(runtime, original, totals);
+            ({ dailyShopCatalog, donationBuildings, donationStatus } = originalCatalogs);
+            renderDailyShopList(); renderDonationSettings();
+            for (const item of queue) if (item.outcome === 'pending') item.detail = '本批已停止，未执行';
+            setProgress(queue.filter(item => item.outcome !== 'pending').length, queue.length, '多角色任务处理结束');
+            renderCharacterBatch();
+        }
+    }
+
     /******************** 控制台页面 ********************/
     loadSettings();
     function card(page, title, symbol, description = '') {
@@ -2499,6 +2599,51 @@
     const legend = el('div', 'ah-legend'); legend.append(el('b', '', '■ 当前 / 已完成'), el('span', '', '□ 待探索'), el('span', '', '金框 · 首领'));
     routeCard.append(ui.dungeonTitle, ui.dungeonMeta, ui.route, legend);
     const teamCard = card(overview, '队伍状态', 'heart'); ui.team = el('div', 'ah-team'); teamCard.appendChild(ui.team);
+
+    const batchCard = card(overview, '多角色任务队列', 'grid', '勾选同一登录账户下的已绑定角色，按列表顺序执行各角色保存的配置。请先在游戏中分别切换角色，保存日常、探索和捐献设置。');
+    const batchActions = row(batchCard);
+    taskButton(batchActions, '加载绑定角色', 'refresh', '加载绑定角色', loadBatchCharacters);
+    const batchClear = button(batchActions, '清空勾选', null, () => {
+        if (runningTask) return;
+        characterBatch.selected.clear(); renderCharacterBatch();
+    }); batchClear.dataset.lockTask = '1';
+    const batchList = el('div', 'ah-list'); batchList.style.marginTop = '10px'; batchCard.appendChild(batchList);
+    for (const [key, title] of [['daily', '执行日常（包含该角色已开启的扫荡、商店和捐献）'], ['dungeon', '执行探索（保存的副本及连续局数）'], ['donation', '执行捐献（日常已包含时不重复）']]) {
+        const label = el('label', 'ah-toggle'), input = el('input'); input.type = 'checkbox';
+        input.checked = characterBatch[key]; input.dataset.lockTask = '1'; input.dataset.batchMode = key;
+        input.setAttribute('aria-label', title); label.append(el('span', '', title), input); batchCard.appendChild(label);
+        input.onchange = () => { if (runningTask) { input.checked = characterBatch[key]; return; } characterBatch[key] = input.checked; };
+    }
+    const batchStart = button(row(batchCard), '开始多角色任务', 'play', () => runTask('多角色任务', executeCharacterBatch, { batch: true }), 'primary');
+    ui.taskButtons.push(batchStart);
+    batchCard.appendChild(el('div', 'ah-sub', '助手显示正在处理的角色，游戏页面仍保留原角色；运行中请勿手动操作游戏。共享捐献遇冷却即结束本批。普通错误跳到下一角色；停止、登录失效或操作结果不确定时停止整批。刷新页面不会自动继续。'));
+    const batchResults = el('div', 'ah-list'); batchResults.setAttribute('aria-live', 'polite'); batchCard.appendChild(batchResults);
+    function renderCharacterBatch() {
+        batchList.replaceChildren();
+        for (const character of characterBatch.characters) {
+            const label = el('label', 'ah-item'), input = el('input'); input.type = 'checkbox';
+            input.value = character.username; input.dataset.batchCharacter = character.username; input.dataset.lockTask = '1';
+            input.checked = characterBatch.selected.has(character.username); input.disabled = !!runningTask;
+            input.onchange = () => {
+                if (runningTask) { input.checked = characterBatch.selected.has(character.username); return; }
+                if (input.checked) characterBatch.selected.add(character.username); else characterBatch.selected.delete(character.username);
+            };
+            const copy = el('span', 'ah-item-copy', character.name);
+            const policy = readCharacterSettings(character.username);
+            copy.appendChild(el('small', '', `@${character.username} · 探索 ${policy.dungeonPreset || '未配置'} ×${policy.runs} · 捐献 ${policy.donationItem || '未配置'}`));
+            label.append(input, copy); batchList.appendChild(label);
+        }
+        if (!characterBatch.characters.length) batchList.appendChild(el('div', 'ah-empty', '加载绑定角色后勾选本批名单'));
+        batchResults.replaceChildren();
+        const names = { pending: '未执行', running: '执行中', success: '已完成', partial: '有警告', error: '失败', stopped: '已停止' };
+        for (const item of characterBatch.results) {
+            const row = el('div', 'ah-item'), copy = el('span', 'ah-item-copy', `${item.name} (@${item.username}) · ${names[item.outcome]}`);
+            copy.appendChild(el('small', '', item.detail));
+            if (item.counters) copy.appendChild(el('small', '', `胜利 ${item.counters.wins} · 未获胜 ${item.counters.losses} · 扫荡 ${item.counters.sweepDone} · 用券 ${item.counters.accelUsed}`));
+            row.appendChild(copy); batchResults.appendChild(row);
+        }
+    }
+    renderCharacterBatch();
 
     const dailyCard = card(ui.pages.daily, '日常一条龙', 'bolt', '领取邮件，优先高收益每日挑战，完成活动后补领奖励，再购买每日商店商品并按已保存配置捐献。');
     toggleSetting(dailyCard, 'dailySweep', '一键日常包含扫荡'); ui.dailySummary = el('div', 'ah-note'); dailyCard.appendChild(ui.dailySummary);

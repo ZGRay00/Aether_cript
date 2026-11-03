@@ -213,6 +213,7 @@ function prepare() {
         api, rawApi, runTask, requestTaskStop, executeBattle, completeDaily, doMail, doEvents, doAutoPlot, chooseBranch, reconcileCharacter, doDaily, doThesis, doDailyAll, doSweep,
         setupBattleLineup, applyCharacterOrder, battleOrderRows, renderCharacterOrder, dungeonPolicy, hermitDefaultsEnabled, recruitDungeonFriends, dungeonBattle, waitDungeonBattleReady,
         doDonation, loadDonationData, donationStock, donationSelection, renderDonationSettings,
+        characterBatch, executeCharacterBatch, loadBatchCharacters, renderCharacterBatch, readCharacterSettings, taskSettings,
         clampSweepTimes, doReinforce, doDungeonRun, doDungeonRuns, doAllFreeDungeons,
         doDailyShop, loadDailyShopCatalog, dailyShopSelected, dailyShopQuantity, dailyShopKey,
         chooseWxtEventOption, wxtEventOrdinal, chooseEventOption, chooseDifficultyEvent, difficultyOption, saneEnough, campWait, campRecoveryRows, handleCampNode, campKind, campPolicy,
