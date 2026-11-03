@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.2.1
+// @version      2.2.2
 // @description  Aether 图形控制台：高收益日常、地下城接管与探索、背包分解预览与有限强化；角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.2.1';
+    const VERSION = '2.2.2';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -743,6 +743,10 @@
         if (!entryId) return null;
         let state = (await api(`/battle/${entryId}`)).data || {};
         if (state.result || state.status === 'ongoing' || state.status === 'completed') return state;
+        if (policy.lineupDungeon) {
+            // 新战斗 prepare 后先刷新完整探索，再确定专属策略，避免部分响应丢失队伍或预设。
+            policy = dungeonPolicy(await refreshLineupDungeon(policy.lineupDungeon, label), policy);
+        }
 
         const presetSlots = Array.isArray(state.preset?.allies) ? state.preset.allies : [];
         const allies = Array.isArray(state.allies) ? state.allies : [];
@@ -857,18 +861,34 @@
         } }, a?.username, a?.battler?.name])]);
     function battleOrderAccount(ally, dungeon) {
         if (ally?.entry?.ally_type !== 'dungeon_member') return ally?.entry?.key || ally?.username || '';
-        // 地下城的 entry.key 在实际战斗数据中可能是显示名；members.key 才是账号。
-        // 仅通过本场队伍唯一关联，不能用数组顺序或昵称子串推测身份。
+        // entry.key 可能是账号、显示名或战斗内部标识；只与本场最新队伍精确关联。
+        // username 明确给出账号时优先使用，否则结合 key 与实际战斗名，拒绝冲突或同名歧义。
         const members = dungeon?.members || [];
-        const matches = members.filter(m => m.key && (ally.username === m.key || ally.entry.key === m.key ||
-            m.name && ally.entry.key === m.name && ally.battler?.name === m.name));
-        if (matches.length !== 1) throw new Error(`地下城角色「${ally?.battler?.name || ally?.entry?.key || '?'}」无法唯一关联队伍账号，请同步队伍后接管`);
+        const matches = members.filter(m => m.key && (ally.username
+            ? ally.username === m.key
+            : ally.entry.key === m.key || m.name && (ally.entry.key === m.name || ally.battler?.name === m.name)));
+        if (matches.length !== 1) throw new Error(`地下城角色「${ally?.battler?.name || ally?.entry?.key || '?'}」无法唯一关联队伍账号（匹配 ${matches.length} 人，已刷新队伍），请核对队员昵称后接管`);
         return matches[0].key;
+    }
+    async function refreshLineupDungeon(previous, label) {
+        const ctx = activeTaskContext, dungeonId = ctx?.dungeonId || previous?.dungeon_id;
+        const nodeIndex = ctx?.nodeIndex ?? previous?.current_node_index;
+        const leaderId = ctx?.leaderId || previous?.leader_id;
+        const latest = await fetchCurrentDungeon();
+        if (!dungeonId || latest?.dungeon_id !== dungeonId || latest.status !== 'exploring' ||
+            nodeIndex != null && latest.current_node_index !== nodeIndex || leaderId && latest.leader_id !== leaderId) {
+            throw new Error(`${label}：排序前探索、节点或队长已变化，请重新接管`);
+        }
+        if (!Array.isArray(latest.members) || !latest.members.length) throw new Error(`${label}：最新队伍数据缺失，已暂停排序`);
+        return latest;
     }
     async function applyCharacterOrder(entryId, label, policy = taskSettings()) {
         let state = (await api(`/battle/${entryId}`)).data;
         if (battleStarted(state)) return state;
         const rows = battleOrderRows(state), desired = [];
+        if (rows.some(({ ally }) => ally.entry?.ally_type === 'dungeon_member')) {
+            policy = { ...policy, lineupDungeon: await refreshLineupDungeon(policy.lineupDungeon, label) };
+        }
         const accounts = new Map(rows.map(({ ally, index }) => [index, battleOrderAccount(ally, policy.lineupDungeon)]));
         if (policy.lineupDungeon && new Set(accounts.values()).size !== rows.length) throw new Error(`${label}：战斗角色重复关联同一账号，已暂停排序`);
         for (const key of policy.characterOrder) {
