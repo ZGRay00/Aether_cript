@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.4.2
+// @version      2.4.3
 // @description  Aether 图形控制台：高收益日常、地下城接管与探索、背包分解预览与有限强化；角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.4.2';
+    const VERSION = '2.4.3';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -60,7 +60,7 @@
         hermitDefaults: true,
     });
     const NUMBER_LIMITS = {
-        sweepTimes: [1, CONFIG.sweepMaxTimes], runs: [1, 50], accelThreshold: [0, 3600], accelBudget: [0, 100],
+        sweepTimes: [1, CONFIG.sweepMaxTimes], runs: [1, 50], accelThreshold: [0, 3600], accelBudget: [0, 999],
         lossLimit: [1, 10], restartLimit: [0, 30], campSeconds: [0, 300], campTarget: [1, 100],
         bossCampSeconds: [0, 300], bossCampTarget: [1, 100],
         shopMaxEach: [1, 10], sanityFloor: [0, 20], protectRarity: [3, 5], reinforceAttempts: [1, 50],
