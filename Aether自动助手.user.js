@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.3.1
+// @version      2.4.0
 // @description  Aether 图形控制台：高收益日常、地下城接管与探索、背包分解预览与有限强化；角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.3.1';
+    const VERSION = '2.4.0';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -32,7 +32,7 @@
         minDelay: 300,          // 请求间随机延迟下限（毫秒）
         maxDelay: 800,          // 请求间随机延迟上限（毫秒）
         dungeonMaxSteps: 200,   // 地下城挂机单局最大节点步数，防死循环
-        sweepMaxTimes: 16,      // 一次扫荡任务的总次数上限；按服务器单次上限分批
+        sweepMaxTimes: 20,      // 一次扫荡任务的总次数上限；按服务器单次上限分批
         battleMaxWait: 600,     // 战斗等待上限；地下城到期先尝试加速，成功后重新等待结算（秒）
         publicLobbyPollSeconds: 5, // 公开大厅等待满员时的查询间隔，可随时停止
         dungeonMaxRestarts: 30, // 望雪台未刷到策略目标时撤离重开的单批次数上限
@@ -61,7 +61,7 @@
         hermitDefaults: true,
     });
     const NUMBER_LIMITS = {
-        sweepTimes: [1, 16], runs: [1, 50], accelThreshold: [0, 3600], accelBudget: [0, 100],
+        sweepTimes: [1, CONFIG.sweepMaxTimes], runs: [1, 50], accelThreshold: [0, 3600], accelBudget: [0, 100],
         lossLimit: [1, 10], restartLimit: [0, 30], campSeconds: [0, 300], campTarget: [1, 100],
         bossCampSeconds: [0, 300], bossCampTarget: [1, 100],
         shopMaxEach: [1, 10], sanityFloor: [0, 20], protectRarity: [3, 5], reinforceAttempts: [1, 50],
@@ -1079,7 +1079,7 @@
     async function fetchSweepInfo(presetId) {
         return (await api(`/dungeon/sweep/info?preset_id=${encodeURIComponent(presetId)}`)).data || {};
     }
-    // 默认限制单次请求；计划总次数允许分批，但仍受票券、每日额度和 16 次上限限制。
+    // 默认限制单次请求；计划总次数允许分批，但仍受票券、每日额度和任务总上限限制。
     function clampSweepTimes(info, want, perRequest = true) {
         if (info.max_times == null || !Number.isFinite(Number(info.max_times))) throw new Error('扫荡信息缺少有效上限，请刷新后重试');
         const ticketCost = Number(info.ticket_cost);
@@ -2749,7 +2749,7 @@
         }
     }
     renderDonationSettings();
-    const sweepCard = card(ui.pages.daily, '地下城扫荡', 'compass', '一次任务最多 16 次，按服务器单次上限自动分批。每批重新核对每日额度、票券和门票条件。');
+    const sweepCard = card(ui.pages.daily, '地下城扫荡', 'compass', `一次任务最多 ${CONFIG.sweepMaxTimes} 次，按服务器单次上限自动分批。每批重新核对每日额度、票券和门票条件。`);
     const sweepFields = fields(sweepCard);
     const sweepPresetSel = selectSetting(sweepFields, 'sweepPreset', '扫荡副本', [['', '选择扫荡副本…']], true);
     numberSetting(sweepFields, 'sweepTimes', '扫荡次数');
@@ -2759,7 +2759,7 @@
         if (!settings.sweepPreset) throw new Error('请先选择扫荡副本');
         const info = await fetchSweepInfo(settings.sweepPreset);
         const n = clampSweepTimes(info, settings.sweepTimes, false);
-        ui.sweepInfo.textContent = `单次请求上限 ${info.max_times} 次 · 今日剩余 ${info.daily_remaining} 次 · 加速券 ${info.ticket_owned} 张 · 每次 ${info.ticket_cost} 张${info.entry_item_cost?.id ? ` · 每次门票 ${info.entry_item_cost.amount}` : ''}。本次计划 ${n} 次（最多 16 次，自动分批；每批重新核对）。`;
+        ui.sweepInfo.textContent = `单次请求上限 ${info.max_times} 次 · 今日剩余 ${info.daily_remaining} 次 · 加速券 ${info.ticket_owned} 张 · 每次 ${info.ticket_cost} 张${info.entry_item_cost?.id ? ` · 每次门票 ${info.entry_item_cost.amount}` : ''}。本次计划 ${n} 次（最多 ${CONFIG.sweepMaxTimes} 次，自动分批；每批重新核对）。`;
     });
     taskButton(sweepActions, '执行扫荡', 'play', '地下城扫荡', () => doSweep(settings.sweepPreset, settings.sweepTimes), 'primary');
     const plotCard = card(ui.pages.daily, '剧情推进', 'log', '按章节顺序执行战斗和剧情脚本。要求胜利的战斗失败后停止。');
