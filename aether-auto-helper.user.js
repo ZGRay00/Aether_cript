@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.3.0
+// @version      2.3.1
 // @description  Aether 图形控制台：高收益日常、地下城接管与探索、背包分解预览与有限强化；角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.3.0';
+    const VERSION = '2.3.1';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -51,7 +51,7 @@
     const DEFAULT_SETTINGS = Object.freeze({
         dailySweep: false, dailyShop: true, dailyDonation: true, dailyShopOverrides: {}, sweepTimes: 1, sweepPreset: '', dungeonPreset: '', runs: 1,
         visibility: 'private', difficulty: '普通', accelThreshold: 0, accelBudget: 3,
-        lossLimit: 1, restartLimit: 10, rerollWxt: false, wxtStrategy: 'fire', campMode: 'auto', campSeconds: 60,
+        lossLimit: 1, restartLimit: 10, rerollWxt: false, wxtStrategy: 'fire', wxtDifficulty: '', campMode: 'auto', campSeconds: 60,
         campTarget: 90, shop: 'equip_skill', shopMaxEach: 1,
         bossCampMode: 'auto', bossCampSeconds: 60, bossCampTarget: 100,
         eventMode: 'safe', eventGoal: 'clear', sanityFloor: 10, route: 'first', front: 'keep', characterOrder: [],
@@ -73,6 +73,7 @@
         eventMode: ['safe', 'score', 'pause'], eventGoal: ['clear', 'collect'],
         route: ['first', 'camp', 'treasure', 'boss'], front: ['keep', 'hp', 'custom'],
         wxtStrategy: ['fire', 'light'],
+        wxtDifficulty: ['', '简单', '普通', '困难', '极难'],
         donationType: ['quest', 'shared'],
     };
     function normalizeSetting(key, value) {
@@ -1482,7 +1483,7 @@
 
     // ---------- 望雪台（冰龙本）专属流程 ----------
     // 火系保留原招募优先级；双光按账号精确招募指定队友。公开大厅仍走等待满员流程。
-    // 第二事件按策略刷开局，第三事件优先霜藏；难度和撤离权限沿用原规则。
+    // 难度按用户选择；第二事件按策略刷开局，第三事件优先霜藏，撤离权限沿用原规则。
     const WXT_PRESET_RE = /望雪台/;
     const WXT_STRATEGIES = {
         fire: { name: '火系烬蓟', opening: '烬蓟', friends: ['爱神', 'Guqii0812'] },
@@ -1508,15 +1509,14 @@
         log(`望雪台组队策略：${strategy.name} · 开局目标「${strategy.opening}」`);
         return recruitTopFriends(dungeon, strategy.friends, taskSettings().wxtStrategy === 'light');
     }
-    // 返回 { index, source:'wxt' } / { restart:true } / null（回退通用 chooseEventOption）
+    // 返回难度/专属事件选择、{ restart:true } 或 null（回退通用 chooseEventOption）。
     function chooseWxtEventOption(opts, eventNo, policy = taskSettings()) {
+        // 首事件应为难度选择；缺失、重复或锁定目标时暂停，不回退到其他难度。
+        const difficulty = chooseDifficultyEvent({ name: eventNo === 1 ? '望雪台难度选择' : '', options: opts },
+            { difficulty_by_event: true }, policy.wxtDifficulty || policy.difficulty);
+        if (difficulty) return difficulty;
         if (!Array.isArray(opts) || !opts.length) throw new Error('望雪台事件选项为空');
         const text = (o) => `${o?.label || ''} ${o?.description || ''}`;
-        if (eventNo === 1 || (opts.some((o) => o.label === '简单') && opts.some((o) => o.label === '困难'))) {
-            const wanted = policy.rerollWxt ? '简单' : policy.difficulty;
-            const idx = opts.findIndex((o) => String(o.label || '').includes(wanted));
-            if (idx >= 0) return { index: idx, source: 'wxt' };
-        }
         const opening = opts.findIndex((o) => text(o).includes(wxtStrategy(policy).opening));
         if (opening >= 0) return { index: opening, source: 'wxt' };
         if (eventNo === 2 && policy.rerollWxt) return { restart: true, source: 'wxt' };
@@ -1888,11 +1888,12 @@
                     const opts = node.event.options ?? [];
                     if (!Array.isArray(opts)) throw new Error('事件选项格式异常');
                     const name = node.event?.name || '';
-                    let pick = null;
                     const isWxt = WXT_PRESET_RE.test(dungeonName(cur));
-                    if (opts.length && isWxt) {
-                        const ordinal = wxtEventOrdinal(cur, node);
-                        pick = chooseWxtEventOption(opts, ordinal);
+                    const ordinal = isWxt ? wxtEventOrdinal(cur, node) : null;
+                    const wanted = isWxt ? taskSettings().wxtDifficulty || difficulty : difficulty;
+                    let pick = chooseDifficultyEvent(node.event, cur, wanted);
+                    if (!pick && isWxt && (opts.length || ordinal === 1)) {
+                        pick = chooseWxtEventOption(opts, ordinal, { ...taskSettings(), difficulty: wanted });
                         if (!pick && ordinal == null && taskSettings().rerollWxt) throw new Error('望雪台事件阶段不明，已暂停刷开局以避免误撤离');
                         if (pick?.restart) {
                             const limit = Math.min(CONFIG.dungeonMaxRestarts, natural(taskSettings().restartLimit, 10, 30));
@@ -1904,7 +1905,6 @@
                             throw new DungeonRestartError(`望雪台未出现${wxtStrategy().opening}，已撤离；门票和奖励以游戏结算为准`);
                         }
                     }
-                    if (!isWxt) pick = chooseDifficultyEvent(node.event, cur, difficulty);
                     if (!pick) pick = chooseEventOption(opts, name, { sanity, dungeon: cur });
                     if (opts.length && !opts[pick.index]) throw new Error('事件选项已变化');
                     log(`事件「${name}」→ ${opts[pick.index]?.label || '确认'} [${pick.source}]`);
@@ -2772,9 +2772,11 @@
     selectSetting(dungeonFields, 'difficulty', '难度', SETTING_CHOICES.difficulty.map((d) => [d, d]));
     selectSetting(dungeonFields, 'visibility', '队伍可见性', [['private', '私密'], ['friends', '仅好友'], ['public', '公开']], true);
     selectSetting(dungeonFields, 'wxtStrategy', '望雪台组队策略', Object.entries(WXT_STRATEGIES).map(([key, strategy]) => [key, strategy.name]), true);
+    selectSetting(dungeonFields, 'wxtDifficulty', '冰龙本事件难度（望雪台）', [['', '跟随上方难度'], ...SETTING_CHOICES.difficulty.map(d => [d, d])], true);
+    dungeonCard.appendChild(el('div', 'ah-sub', '冰龙本难度事件按此选择执行，开启刷目标开局也不会改成简单。设置按角色保存；配队、事件目标与营地休息策略独立生效。'));
     dungeonCard.appendChild(el('div', 'ah-sub', '火系烬蓟沿用原队友优先级；双光爆破招募 @Ilya、@a，开局目标为晨露草。自动重开仍由策略页“望雪台刷目标开局”控制；公开队伍继续等待满员。'));
     ui.dungeonSummary = el('div', 'ah-note'); dungeonCard.appendChild(ui.dungeonSummary);
-    dungeonCard.appendChild(el('div', 'ah-sub', '难度也用于认知晶庭等副本内的难度选择事件；按选项名称匹配，不按排列顺序猜测。目标难度缺失或无法唯一识别时暂停。望雪台仍沿用专属策略。'));
+    dungeonCard.appendChild(el('div', 'ah-sub', '难度也用于认知晶庭等副本内的难度选择事件；冰龙本可单独指定。按选项名称匹配，不按排列顺序猜测；目标难度缺失、重复或不可选时暂停。'));
     const dungeonActions = row(dungeonCard); dungeonActions.style.marginTop = '12px';
     taskButton(dungeonActions, '接管当前', 'refresh', '接管探索', resumeDungeon);
     taskButton(dungeonActions, '开始探索', 'play', '地下城探索', () => doDungeonRuns(settings.dungeonPreset, settings.visibility, settings.difficulty, settings.runs), 'primary ah-grow');
@@ -2938,7 +2940,7 @@
     numberSetting(budgetFields, 'lossLimit', '连续未通关上限');
     numberSetting(budgetFields, 'restartLimit', '望雪台重开上限');
     toggleSetting(budgetCard, 'rerollWxt', '望雪台刷目标开局');
-    budgetCard.appendChild(el('div', 'ah-sub', '刷开局启用后难度选简单；仅“开始探索”可自动撤离重开，接管与免费全刷不会自动重开。'));
+    budgetCard.appendChild(el('div', 'ah-sub', '刷开局仍按“冰龙本事件难度”选择难度；仅“开始探索”可自动撤离重开，接管与免费全刷不会自动重开。'));
     const tacticsCard = card(ui.pages.settings, '探索策略', 'compass'); const tacticsFields = fields(tacticsCard);
     selectSetting(tacticsFields, 'eventMode', '未知事件', [['safe', '自动选择（保守优先）'], ['score', '收益关键词优先'], ['pause', '未知事件手动处理']], true);
     selectSetting(tacticsFields, 'eventGoal', '事件目标', [['clear', '保通关 / 理智保护'], ['collect', '材料情报优先']]);
@@ -3176,7 +3178,9 @@
         const preset = dungeonPreset({ preset_id: policy.dungeonPreset });
         const plannedDungeon = activeTaskContext?.dungeonId ? runtime.dungeon : { preset_id: policy.dungeonPreset };
         if (hermitDefaultsEnabled(plannedDungeon, policy)) ui.dungeonSummary.textContent += ' · 旧日专属：ldya 1 号位 / Guqii0812 2 号位 · 全部 Buff 与理智 · 道中跳营地 / Boss 前 100s';
-        ui.dungeonSummary.textContent += preset?.difficulty_by_event ? ` · 事件难度目标：${WXT_PRESET_RE.test(preset.name || '') && policy.rerollWxt ? '简单' : policy.difficulty}` : ` · 难度：${policy.difficulty}`;
+        const isWxt = WXT_PRESET_RE.test(dungeonName(plannedDungeon));
+        ui.dungeonSummary.textContent += preset?.difficulty_by_event || isWxt
+            ? ` · 事件难度目标：${isWxt ? policy.wxtDifficulty || policy.difficulty : policy.difficulty}` : ` · 难度：${policy.difficulty}`;
         const allowance = runtime.explorationAllowance;
         const presetId = activeTaskContext?.dungeonId ? runtime.dungeon?.preset_id : policy.dungeonPreset;
         if (allowance?.daily && String(allowance.presetId) === String(presetId)) {
