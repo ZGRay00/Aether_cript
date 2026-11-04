@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.4.3
-// @description  Aether 图形控制台：高收益日常、地下城接管与探索、背包分解预览与有限强化；角色独立配置、任务取消和多标签互斥。
+// @version      2.5.0
+// @description  Aether 图形控制台：高收益日常、玩家赠送、地下城接管与探索、背包分解预览与有限强化；分级菜单、角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
 // @downloadURL  none
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.4.3';
+    const VERSION = '2.5.0';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -57,10 +57,10 @@
         protectRarity: 4, protectReinforced: true, reinforceAttempts: 5, friends: [], sync: true,
         donationBuilding: '', donationType: 'quest', donationItem: '', donationLevel: 0,
         donationQuantity: 1, donationTimes: 1,
-        hermitDefaults: true,
+        hermitDefaults: true, dailyGift: false, giftPlan: {},
     });
     const NUMBER_LIMITS = {
-        sweepTimes: [1, CONFIG.sweepMaxTimes], runs: [1, 50], accelThreshold: [0, 3600], accelBudget: [0, 999],
+        sweepTimes: [1, CONFIG.sweepMaxTimes], runs: [1, 999], accelThreshold: [0, 3600], accelBudget: [0, 999],
         lossLimit: [1, 10], restartLimit: [0, 30], campSeconds: [0, 300], campTarget: [1, 100],
         bossCampSeconds: [0, 300], bossCampTarget: [1, 100],
         shopMaxEach: [1, 10], sanityFloor: [0, 20], protectRarity: [3, 5], reinforceAttempts: [1, 50],
@@ -77,6 +77,16 @@
     };
     function normalizeSetting(key, value) {
         const fallback = DEFAULT_SETTINGS[key];
+        if (key === 'giftPlan') {
+            const keys = ['character', 'targetUsername', 'entryUuid', 'targetName', 'itemLabel', 'fingerprint'];
+            if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length) return {};
+            if (Object.keys(value).length !== keys.length || keys.some(k => typeof value[k] !== 'string' || !value[k].trim() || value[k].length > 65536)) return {};
+            try {
+                const item = JSON.parse(value.fingerprint);
+                if (!item || item.uuid !== value.entryUuid || item.locked) return {};
+            } catch (_) { return {}; }
+            return { ...value };
+        }
         if (key === 'characterOrder') return Array.isArray(value) ? [...new Set(value.filter(v => typeof v === 'string')
             .map(v => v.trim()).filter(v => v === 'self' || /^key:\S.*$/.test(v)))].slice(0, 50) : [];
         if (key === 'dailyShopOverrides') return value && typeof value === 'object' && !Array.isArray(value)
@@ -406,7 +416,8 @@
                 if (xhr.status < 200 || xhr.status >= 300) {
                     finish(reject, new ApiError(json?.message || `HTTP ${xhr.status}`, xhr.status, json?.code, path, method !== 'GET' && xhr.status >= 500));
                 } else if (!json || json.code !== 0) {
-                    finish(reject, new ApiError(json?.message || '服务器返回异常', xhr.status, json?.code, path, method !== 'GET' && !json));
+                    const validCode = json && typeof json === 'object' && !Array.isArray(json) && Number.isInteger(json.code);
+                    finish(reject, new ApiError(json?.message || '服务器返回异常', xhr.status, json?.code, path, method !== 'GET' && !validCode));
                 } else {
                     finish(resolve, json);
                 }
@@ -480,6 +491,7 @@
 #aether-auto-helper-panel .ah-logs{display:flex;flex-direction:column;gap:7px}#aether-auto-helper-panel .ah-log-line{border-left:2px solid #39506a;padding:8px 9px;background:#142031;border-radius:0 7px 7px 0;overflow-wrap:anywhere;white-space:pre-wrap;font-size:11px;color:#c5d5e5}#aether-auto-helper-panel .ah-log-line.success{border-color:var(--cyan)}#aether-auto-helper-panel .ah-log-line.warn{border-color:var(--orange)}#aether-auto-helper-panel .ah-log-line.error{border-color:var(--red)}#aether-auto-helper-panel .ah-log-line time{color:var(--muted);font-size:10px;margin-right:8px}#aether-auto-helper-panel .ah-foot{display:flex;align-items:center;gap:8px;flex:none;padding:10px 16px;border-top:1px solid var(--line);background:#0c1420;color:var(--muted);font-size:10px}#aether-auto-helper-panel .ah-foot>span:first-child{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#aether-auto-helper-panel .ah-time{font-variant-numeric:tabular-nums}
 #aether-auto-helper-panel.ah-collapsed{width:52px!important;height:52px!important;border-radius:17px;min-height:0;max-height:52px}#aether-auto-helper-panel.ah-collapsed .ah-head,#aether-auto-helper-panel.ah-collapsed .ah-status,#aether-auto-helper-panel.ah-collapsed .ah-tabs,#aether-auto-helper-panel.ah-collapsed .ah-content,#aether-auto-helper-panel.ah-collapsed .ah-foot{display:none}#aether-auto-helper-panel .ah-launcher{display:none;background:none;border:0;width:100%;height:100%;color:var(--cyan);touch-action:none}#aether-auto-helper-panel.ah-collapsed .ah-launcher{display:grid;place-items:center}#aether-auto-helper-panel .ah-launcher svg{width:27px;height:27px}
 #aether-auto-helper-panel .ah-update-btn{flex:none;padding:7px 8px;min-height:32px;font-size:11px;color:var(--cyan);white-space:nowrap}
+#aether-auto-helper-panel .ah-subnav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;padding:6px;background:var(--bg);border:1px solid var(--line);border-radius:11px;position:sticky;top:-1px;z-index:2;flex:none;box-shadow:0 5px 14px #0d152240}#aether-auto-helper-panel .ah-subtab{min-width:0;min-height:34px;border:1px solid transparent;border-radius:7px;padding:7px 3px;background:transparent;color:var(--muted);font-size:11px;line-height:1.4}#aether-auto-helper-panel .ah-subtab:hover{background:var(--card);color:var(--text)}#aether-auto-helper-panel .ah-subtab[aria-selected=true]{background:#62e0d117;border-color:#62e0d145;color:var(--cyan);font-weight:600}#aether-auto-helper-panel .ah-subpage{display:flex;flex-direction:column;gap:12px;min-width:0}#aether-auto-helper-panel .ah-subnav[data-count="2"]{grid-template-columns:repeat(2,minmax(0,1fr))}
 @media(max-width:520px){#aether-auto-helper-panel{right:10px;bottom:76px;width:calc(100vw - 20px);max-width:calc(100vw - 20px);max-height:calc(100dvh - 100px);border-radius:16px}#aether-auto-helper-panel .ah-head{padding:12px 14px 10px}#aether-auto-helper-panel .ah-content{padding:12px}#aether-auto-helper-panel .ah-card{padding:12px}#aether-auto-helper-panel .ah-tab{padding-top:8px;padding-bottom:9px}#aether-auto-helper-panel .ah-hero-title{font-size:18px}}
 @media(max-width:520px){#aether-auto-helper-panel .ah-head{gap:6px}#aether-auto-helper-panel .ah-emblem{width:30px;height:30px}#aether-auto-helper-panel .ah-brand strong{display:block;font-size:14px;letter-spacing:2px}#aether-auto-helper-panel .ah-version{display:inline-block;margin-left:0;vertical-align:baseline}#aether-auto-helper-panel .ah-brand small{display:none}}
 @media(prefers-reduced-motion:reduce){#aether-auto-helper-panel *{transition:none!important}}
@@ -683,7 +695,7 @@
         if (!character) { log('请先登录游戏并选择角色', 'warn'); return; }
         clearSettingsImport();
         const ctx = {
-            name, character, settings: { ...settings, friends: [...preferredFriends], characterOrder: [...settings.characterOrder], dailyShopOverrides: { ...settings.dailyShopOverrides } },
+            name, character, settings: { ...settings, friends: [...preferredFriends], characterOrder: [...settings.characterOrder], dailyShopOverrides: { ...settings.dailyShopOverrides }, giftPlan: { ...settings.giftPlan } },
             controller: new AbortController(), stopError: new StopError(),
             dungeonId: null, nodeIndex: null, accelUsed: 0,
         };
@@ -1081,7 +1093,12 @@
     // 默认限制单次请求；计划总次数允许分批，但仍受票券、每日额度和任务总上限限制。
     function clampSweepTimes(info, want, perRequest = true) {
         if (info.max_times == null || !Number.isFinite(Number(info.max_times))) throw new Error('扫荡信息缺少有效上限，请刷新后重试');
-        const ticketCost = Number(info.ticket_cost);
+        const numeric = value => typeof value === 'number' || typeof value === 'string' && value.trim() !== '';
+        const ticketCost = numeric(info.ticket_cost) ? Number(info.ticket_cost) : NaN;
+        if (!Number.isSafeInteger(ticketCost) || ticketCost < 0 || ticketCost > 0 &&
+            (!numeric(info.ticket_owned) || !Number.isSafeInteger(Number(info.ticket_owned)) || Number(info.ticket_owned) < 0)) {
+            throw new Error('扫荡票券报价或库存异常，请刷新后重试');
+        }
         const ticketCap = ticketCost > 0 ? Math.floor(natural(info.ticket_owned) / ticketCost) : natural(info.daily_remaining);
         const cap = Math.min(perRequest ? natural(info.max_times) : natural(info.max_times) > 0 ? Infinity : 0,
             ticketCap, natural(info.daily_remaining), CONFIG.sweepMaxTimes);
@@ -1529,10 +1546,16 @@
             return { index, source: 'wxt' };
         }
         const opening = opts.findIndex((o) => text(o).includes(wxtStrategy(policy).opening));
-        if (opening >= 0) return { index: opening, source: 'wxt' };
+        if (opening >= 0) {
+            if (!eventOptionAvailable(opts[opening])) throw new Error('望雪台开局目标当前不可选，请手动处理后接管');
+            return { index: opening, source: 'wxt' };
+        }
         if (eventNo === 2 && policy.rerollWxt) return { restart: true, source: 'wxt' };
         const frost = opts.findIndex((o) => text(o).includes('霜藏'));
-        if (frost >= 0) return { index: frost, source: 'wxt' };
+        if (frost >= 0) {
+            if (!eventOptionAvailable(opts[frost])) throw new Error('望雪台霜藏当前不可选，请手动处理后接管');
+            return { index: frost, source: 'wxt' };
+        }
         return null;
     }
     function wxtEventOrdinal(dungeon, node) {
@@ -1617,6 +1640,9 @@
         if (options[index].disabled === true || options[index].locked === true || options[index].available === false) throw new Error(`目标难度「${wanted}」当前不可选，请调整难度后接管`);
         return { index, source: `difficulty:${wanted}` };
     }
+    function eventOptionAvailable(option) {
+        return !!option && option.disabled !== true && option.locked !== true && option.available !== false;
+    }
     // 无选项事件按游戏“确认”提交 0；有选项时按标签映射，未知事件自动保守评分。
     function chooseEventOption(options, eventName = '', ctx = {}) {
         if (!Array.isArray(options)) throw new Error('事件选项格式异常');
@@ -1633,7 +1659,7 @@
         };
         const preferred = findLabel(rule?.pick);
         if (preferred >= 0) costs[preferred] = Math.max(costs[preferred], rule.cost || 0);
-        const allowed = (i) => taskSettings().eventGoal === 'collect' || !costs[i] || saneEnough(ctx, costs[i]);
+        const allowed = (i) => eventOptionAvailable(options[i]) && (taskSettings().eventGoal === 'collect' || !costs[i] || saneEnough(ctx, costs[i]));
         if (preferred >= 0 && allowed(preferred)) return { index: preferred, source: 'table' };
         const fallback = findLabel(rule?.fallback);
         if (fallback >= 0 && allowed(fallback)) {
@@ -1641,7 +1667,7 @@
             return { index: fallback, source: 'table' };
         }
         const candidates = options.map((option, index) => ({ option, index })).filter(({ index }) => allowed(index));
-        if (!candidates.length) throw new Error(`事件「${eventName}」所有选项都超出理智保留值，请手动选择或调整策略`);
+        if (!candidates.length) throw new Error(`事件「${eventName}」没有可用且满足理智保留值的选项，请手动选择或调整策略`);
         if (taskSettings().eventMode === 'pause' && !rule) throw new Error(`事件「${eventName}」需手动选择，完成后可继续接管`);
         if (options.length === 1) return { index: 0, source: 'single' };
         if (taskSettings().eventMode !== 'score') {
@@ -1984,7 +2010,7 @@
     // 连续挂机：重复执行 doDungeonRun N 次（次数留空/0/1 = 单局）。
     // 每局结束应已自动结算；若仍有残留的活动地下城则停止并提示人工接管，避免误入旧局。
     async function doDungeonRuns(presetId, visibility, difficulty, times, strictPreset = false) {
-        const total = Math.max(1, natural(times, 1, 50));
+        const total = Math.max(1, natural(times, 1, NUMBER_LIMITS.runs[1]));
         let finished = 0, wins = 0, losses = 0, consecutiveLosses = 0;
         const ctx = activeTaskContext;
         if (ctx) { ctx.allowRestart = !strictPreset; ctx.freeOnly = strictPreset; }
@@ -2415,6 +2441,108 @@
         }
         log(`指定捐献任务完成：${shared ? `${completed} 次共享贡献` : '本次指定数量已处理'}`, 'success');
     }
+    // 官网赠送按条目提交，每 24 小时一次；接口没有 quantity，不能把库存数当作可指定数量。
+    const giftState = { character: '', friends: [], status: null, targetUsername: '', selectedUuid: '', review: null };
+    function clearGiftReview() {
+        giftState.review = null;
+        if (ui.ready) renderGiftReview();
+    }
+    function resetGiftState() {
+        Object.assign(giftState, { character: '', friends: [], status: null, targetUsername: '', selectedUuid: '', review: null });
+        if (ui.ready) renderGiftSettings();
+    }
+    async function readGiftData() {
+        const results = await Promise.allSettled([api('/social/friends'), api('/social/gift/status'), api('/status')]);
+        for (const result of results) if (result.status === 'rejected') { rethrowIfStopped(result.reason); throw result.reason; }
+        if (results[2].value.data?.username !== (activeTaskContext?.character || getCharacter())) {
+            const error = new Error('赠送角色身份不一致，已停止，请刷新游戏状态');
+            error.fatal = true; throw error;
+        }
+        const friends = results[0].value.data?.friends, status = results[1].value.data;
+        if (!Array.isArray(friends) || friends.some(f => !f || typeof f.username !== 'string' || !f.username.trim()) ||
+            new Set(friends.map(f => f.username)).size !== friends.length) throw new Error('赠送好友列表异常，请重新加载');
+        if (!status || typeof status.on_cooldown !== 'boolean' || !Array.isArray(status.tradeable_items) ||
+            status.on_cooldown && (!Number.isFinite(status.cooldown_until) || status.cooldown_until <= 0) ||
+            status.tradeable_items.some(item => !item || typeof item.uuid !== 'string' || !item.uuid ||
+                item.count != null && (!Number.isSafeInteger(item.count) || item.count < 1)) ||
+            new Set(status.tradeable_items.map(item => item.uuid)).size !== status.tradeable_items.length) {
+            throw new Error('可赠物品或冷却状态异常，请重新加载');
+        }
+        return { friends, status };
+    }
+    async function loadGiftData() {
+        clearGiftReview();
+        const data = await readGiftData();
+        Object.assign(giftState, data, { character: getCharacter() });
+        if (!data.friends.some(f => f.username === giftState.targetUsername)) giftState.targetUsername = '';
+        if (!data.status.tradeable_items.some(item => item.uuid === giftState.selectedUuid && !item.locked)) giftState.selectedUuid = '';
+        renderGiftSettings();
+        log(`赠送：已加载 ${data.friends.length} 位好友、${data.status.tradeable_items.filter(item => !item.locked).length} 个可选条目`);
+    }
+    function giftSelection(data, targetUsername, entryUuid) {
+        if (!targetUsername || !entryUuid) throw new Error('请先选择目标好友和赠送的道具或装备');
+        if (targetUsername === (activeTaskContext?.character || getCharacter()) || targetUsername === runtime.status?.username) throw new Error('不能向当前角色赠送物品');
+        const friend = data.friends.find(f => f.username === targetUsername);
+        if (!friend) throw new Error('目标已不在好友列表，请重新选择');
+        if (data.status.on_cooldown) throw new Error(`赠送仍在冷却，可再次赠送时间：${new Date(data.status.cooldown_until * 1000).toLocaleString()}`);
+        const item = data.status.tradeable_items.find(item => item.uuid === entryUuid);
+        if (!item || item.locked) throw new Error('所选物品已不可赠送或被锁定，请重新加载');
+        return { friend, item };
+    }
+    function giftItemLabel(item) {
+        return `${item.name || item.item_id || item.uuid}${item.rarity != null ? ` · ${item.rarity}★` : ''}${item.reinforce_level != null ? ` · 强化 +${item.reinforce_level}` : ''}${item.count != null ? ` · 当前库存 ${item.count}` : ''}${item.bound ? ' · 已绑定' : ''}`;
+    }
+    async function previewGift() {
+        clearGiftReview();
+        if (giftState.character !== getCharacter()) throw new Error('请先为当前角色加载赠送列表');
+        const { targetUsername, selectedUuid } = giftState;
+        const data = await readGiftData();
+        const { friend, item } = giftSelection(data, targetUsername, selectedUuid);
+        Object.assign(giftState, data);
+        giftState.review = { character: getCharacter(), targetUsername, entryUuid: selectedUuid,
+            targetName: String(friend.name || friend.username), itemLabel: giftItemLabel(item), fingerprint: JSON.stringify(item) };
+        renderGiftSettings();
+    }
+    function saveDailyGiftPlan() {
+        if (runningTask) return;
+        const review = giftState.review;
+        if (!review || review.character !== getCharacter() || settingsCharacter !== review.character ||
+            giftState.targetUsername !== review.targetUsername || giftState.selectedUuid !== review.entryUuid) {
+            clearGiftReview(); log('赠送预览已失效，请重新预览后保存日常计划', 'warn'); return;
+        }
+        setSetting('giftPlan', { ...review });
+        clearGiftReview(); renderGiftSettings(); renderPolicySummary();
+        log(`已保存日常赠送计划：@${review.targetUsername} · ${review.itemLabel}；在“日常任务”勾选玩家赠送后生效`, 'success');
+    }
+    async function sendGift(review, daily = false) {
+        if (review.character !== (activeTaskContext?.character || getCharacter())) throw new Error('赠送计划属于其他角色，请重新选择并保存');
+        const data = await readGiftData();
+        if (daily && data.status.on_cooldown) { log('日常玩家赠送：当前处于冷却，本次跳过'); return false; }
+        const { item } = giftSelection(data, review.targetUsername, review.entryUuid);
+        if (JSON.stringify(item) !== review.fingerprint) throw new Error('所选物品或库存已变化，请重新预览并保存计划');
+        const result = await api('/social/gift', { method: 'POST', body: { target_username: review.targetUsername, entry_uuid: review.entryUuid } });
+        log(`已向「${review.targetName}」(@${review.targetUsername}) 赠送「${review.itemLabel}」：${result.message || '服务器已确认'}`, 'success');
+        return true;
+    }
+    async function doDailyGift() {
+        const plan = taskSettings().giftPlan;
+        if (!plan?.entryUuid) { log('日常玩家赠送：尚未保存赠送计划，本次跳过'); return; }
+        await sendGift(plan, true);
+    }
+    async function commitGift() {
+        const review = giftState.review;
+        clearGiftReview(); // 一次确认只允许一次提交；失败、停止或响应丢失后必须重新预览。
+        if (!review || review.character !== getCharacter() || giftState.character !== review.character ||
+            giftState.targetUsername !== review.targetUsername || giftState.selectedUuid !== review.entryUuid) {
+            throw new Error('赠送预览已失效，请重新选择并预览');
+        }
+        await sendGift(review);
+        giftState.selectedUuid = '';
+        // 成功后更新可赠列表与发送方库存；读取失败不重发，也不以库存变化推断收件人。
+        try { await loadGiftData(); await loadBackpack(); renderBagList(); }
+        catch (e) { rethrowIfStopped(e); markIssue(`赠送已成功，刷新状态失败：${e.message}`); }
+    }
+
     async function doDailyAll(sweepPresetId, sweepTimes = 1, includeSweep = false) {
         const steps = [['邮件领取', doMail], ['每日战斗', doDaily], ['活动处理', () => doEvents()]];
         if (includeSweep) {
@@ -2430,6 +2558,7 @@
             }
             await doDonation({ waitForCooldown: false });
         }]);
+        if (taskSettings().dailyGift) steps.push(['玩家赠送', doDailyGift]);
         for (let i = 0; i < steps.length; i++) {
             checkStop(); const [name, fn] = steps[i]; setProgress(i, steps.length, name);
             try { await fn(); } catch (e) { rethrowIfStopped(e); markIssue(`${name}：${e.message}`); }
@@ -2572,12 +2701,58 @@
     }
     function row(parent) { const r = el('div', 'ah-row'); parent.appendChild(r); return r; }
     function fields(parent) { const r = el('div', 'ah-fields'); parent.appendChild(r); return r; }
-    function openTab(name) {
+    // 二级菜单仅保存浏览位置，不改变角色配置；任务期间仍可切换并查看日志或停止。
+    function sectionPage(page, key, label) {
+        const pageKey = page.id.replace('ah-page-', '');
+        ui.sections ??= {};
+        let group = ui.sections[pageKey];
+        if (!group) {
+            const nav = el('div', 'ah-subnav'); nav.setAttribute('role', 'tablist');
+            nav.setAttribute('aria-label', `${document.getElementById(page.getAttribute('aria-labelledby'))?.textContent || pageKey}功能分组`);
+            page.prepend(nav);
+            group = ui.sections[pageKey] = { nav, panes: {}, buttons: {}, scrolls: {}, active: '', saved: readStorage(`aether-helper-v2-section:${pageKey}`, '') };
+        }
+        if (group.panes[key]) return group.panes[key];
+        const pane = el('div', 'ah-subpage'), tab = el('button', 'ah-subtab', label);
+        pane.id = `ah-section-${pageKey}-${key}`; pane.setAttribute('role', 'tabpanel');
+        tab.id = `ah-subtab-${pageKey}-${key}`; tab.dataset.section = key;
+        tab.setAttribute('role', 'tab'); tab.setAttribute('aria-controls', pane.id); pane.setAttribute('aria-labelledby', tab.id);
+        tab.onclick = () => openSection(pageKey, key);
+        tab.onkeydown = event => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const buttons = Object.values(group.buttons), index = buttons.indexOf(tab);
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+                : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+            buttons[next].click(); buttons[next].focus({ preventScroll: true });
+        };
+        group.panes[key] = pane; group.buttons[key] = tab;
+        group.nav.appendChild(tab); group.nav.dataset.count = String(Object.keys(group.panes).length); page.appendChild(pane);
+        pane.hidden = true; tab.tabIndex = -1; tab.setAttribute('aria-selected', 'false');
+        if (!group.active || group.saved === key) openSection(pageKey, key, false);
+        return pane;
+    }
+    function openSection(pageKey, key, persist = true) {
+        const group = ui.sections?.[pageKey];
+        if (!group?.panes[key]) return;
+        const visible = ui.ready && ui.tab === pageKey;
+        if (visible && group.active) group.scrolls[group.active] = content.scrollTop;
+        group.active = key;
+        for (const [name, pane] of Object.entries(group.panes)) {
+            pane.hidden = name !== key;
+            group.buttons[name].setAttribute('aria-selected', String(name === key));
+            group.buttons[name].tabIndex = name === key ? 0 : -1;
+        }
+        if (visible) { content.scrollTop = group.scrolls[key] || 0; constrainPanel(); }
+        if (persist) { group.saved = key; writeStorage(`aether-helper-v2-section:${pageKey}`, key); }
+    }
+    function openTab(name, section = '') {
         if (!ui.pages[name]) name = 'overview';
         ui.scrolls = ui.scrolls || {}; ui.scrolls[ui.tab] = content.scrollTop; ui.tab = name;
         for (const [key, page] of Object.entries(ui.pages)) page.hidden = key !== name;
         for (const tab of tabs.children) { tab.setAttribute('aria-selected', String(tab.dataset.page === name)); tab.tabIndex = tab.dataset.page === name ? 0 : -1; }
         content.scrollTop = ui.scrolls[name] || 0; writeStorage('aether-helper-v2-tab', name);
+        if (section) openSection(name, section);
         if (name === 'logs') renderLogs();
         if (name === 'dungeon' && ui.ready) renderCharacterOrder();
         constrainPanel();
@@ -2593,7 +2768,7 @@
             buttons[next].click(); buttons[next].focus();
         };
     }
-    const overview = ui.pages.overview;
+    const overview = sectionPage(ui.pages.overview, 'status', '任务状态');
     const hero = el('section', 'ah-card ah-hero'), heroRow = el('div', 'ah-hero-row'), heroCopy = el('div', 'ah-hero-copy');
     ui.heroTitle = el('div', 'ah-hero-title'); ui.heroMeta = el('div', 'ah-hero-meta');
     heroCopy.append(el('div', 'ah-eyebrow', 'MISSION CONTROL'), ui.heroTitle, ui.heroMeta);
@@ -2605,13 +2780,13 @@
     for (const text of ['本批胜利', '未获胜', '加速用券', '商店支出']) { const stat = el('div', 'ah-stat'), value = el('strong', '', '0'); ui.stats.push(value); stat.append(value, el('small', '', text)); stats.appendChild(stat); } overview.appendChild(stats);
     const overviewActions = row(overview);
     taskButton(overviewActions, '同步状态', 'refresh', '同步状态', refreshAll);
-    button(overviewActions, '安排探索', 'compass', () => openTab('dungeon'), 'primary ah-grow');
+    button(overviewActions, '安排探索', 'compass', () => openTab('dungeon', 'plan'), 'primary ah-grow');
     const routeCard = card(overview, '探索路线', 'compass'); ui.dungeonTitle = el('div'); ui.dungeonMeta = el('div', 'ah-sub'); ui.route = el('div', 'ah-route');
     const legend = el('div', 'ah-legend'); legend.append(el('b', '', '■ 当前 / 已完成'), el('span', '', '□ 待探索'), el('span', '', '金框 · 首领'));
     routeCard.append(ui.dungeonTitle, ui.dungeonMeta, ui.route, legend);
     const teamCard = card(overview, '队伍状态', 'heart'); ui.team = el('div', 'ah-team'); teamCard.appendChild(ui.team);
 
-    const batchCard = card(overview, '多角色任务队列', 'grid', '勾选同一登录账户下的已绑定角色，按列表顺序执行各角色保存的配置。请先在游戏中分别切换角色，保存日常、探索和捐献设置。');
+    const batchCard = card(sectionPage(ui.pages.overview, 'batch', '多角色队列'), '多角色任务队列', 'grid', '勾选同一登录账户下的已绑定角色，按列表顺序执行各角色保存的配置。请先在游戏中分别切换角色，保存日常、探索和捐献设置。');
     const batchActions = row(batchCard);
     taskButton(batchActions, '加载绑定角色', 'refresh', '加载绑定角色', loadBatchCharacters);
     const batchClear = button(batchActions, '清空勾选', null, () => {
@@ -2619,7 +2794,7 @@
         characterBatch.selected.clear(); renderCharacterBatch();
     }); batchClear.dataset.lockTask = '1';
     const batchList = el('div', 'ah-list'); batchList.style.marginTop = '10px'; batchCard.appendChild(batchList);
-    for (const [key, title] of [['daily', '执行日常（包含该角色已开启的扫荡、商店和捐献）'], ['dungeon', '执行探索（保存的副本及连续局数）'], ['donation', '执行捐献（日常已包含时不重复）']]) {
+    for (const [key, title] of [['daily', '执行日常（包含已开启的扫荡、商店、建筑捐献和玩家赠送）'], ['dungeon', '执行探索（保存的副本及连续局数）'], ['donation', '执行建筑捐献（日常已包含时不重复）']]) {
         const label = el('label', 'ah-toggle'), input = el('input'); input.type = 'checkbox';
         input.checked = characterBatch[key]; input.dataset.lockTask = '1'; input.dataset.batchMode = key;
         input.setAttribute('aria-label', title); label.append(el('span', '', title), input); batchCard.appendChild(label);
@@ -2656,14 +2831,17 @@
     }
     renderCharacterBatch();
 
-    const dailyCard = card(ui.pages.daily, '日常一条龙', 'bolt', '领取邮件，优先高收益每日挑战，完成活动后补领奖励，再购买每日商店商品并按已保存配置捐献。');
-    toggleSetting(dailyCard, 'dailySweep', '一键日常包含扫荡'); ui.dailySummary = el('div', 'ah-note'); dailyCard.appendChild(ui.dailySummary);
+    const dailyCard = card(sectionPage(ui.pages.daily, 'tasks', '日常任务'), '日常一条龙', 'bolt', '领取邮件、优先高收益每日挑战、完成活动并补领奖励，再执行下方勾选的商店、建筑捐献和玩家赠送计划。');
+    toggleSetting(dailyCard, 'dailySweep', '一键日常包含扫荡');
+    toggleSetting(dailyCard, 'dailyShop', '一键日常包含每日商店');
+    toggleSetting(dailyCard, 'dailyDonation', '一键日常包含建筑捐献');
+    toggleSetting(dailyCard, 'dailyGift', '一键日常包含玩家赠送');
+    ui.dailySummary = el('div', 'ah-note'); dailyCard.appendChild(ui.dailySummary);
     const dailyActions = row(dailyCard); dailyActions.style.marginTop = '12px';
     taskButton(dailyActions, '开始日常', 'play', '日常一条龙', () => doDailyAll(settings.sweepPreset, settings.sweepTimes, settings.dailySweep), 'primary ah-grow');
     const quick = row(dailyCard); quick.style.marginTop = '8px';
     taskButton(quick, '邮件', null, '邮件领取', doMail); taskButton(quick, '每日战斗', null, '每日战斗', doDaily); taskButton(quick, '活动', null, '活动处理', () => doEvents());
-    const dailyShopCard = card(ui.pages.daily, '每日商店', 'bag', '默认购买除雷渊晶石以外的所有商品，按今日剩余限购和实际余额购买。材料兑换商品也包含在内，可逐项取消勾选。');
-    toggleSetting(dailyShopCard, 'dailyShop', '一键日常包含每日商店');
+    const dailyShopCard = card(sectionPage(ui.pages.daily, 'shop', '每日商店'), '每日商店', 'bag', '默认购买除雷渊晶石以外的所有商品，按今日剩余限购和实际余额购买。材料兑换商品也包含在内，可逐项取消勾选。');
     const dailyShopActions = row(dailyShopCard);
     taskButton(dailyShopActions, '加载商品', 'refresh', '加载每日商店', loadDailyShopCatalog);
     taskButton(dailyShopActions, '购买所选商品', 'bag', '每日商店购买', doDailyShop, 'primary');
@@ -2693,8 +2871,7 @@
         if (!dailyShopCatalog.length) dailyShopList.appendChild(el('div', 'ah-empty', '加载商品后可调整范围；未修改时采用默认范围。'));
     }
     renderDailyShopList();
-    const donationCard = card(ui.pages.daily, '建筑材料捐献', 'bag', '选择建筑和材料后启动。个人物品按指定数量捐献；共享材料按指定次数贡献，冷却期间自动等待。');
-    toggleSetting(donationCard, 'dailyDonation', '一键日常包含自动捐献');
+    const donationCard = card(sectionPage(ui.pages.daily, 'donation', '建筑捐献'), '建筑材料捐献', 'bag', '选择建筑和材料后启动。个人物品按指定数量捐献；共享材料按指定次数贡献，冷却期间自动等待。');
     const donationActions = row(donationCard);
     taskButton(donationActions, '加载建筑材料', 'refresh', '加载建筑材料', loadDonationData);
     const donationFields = fields(donationCard); donationFields.style.marginTop = '10px';
@@ -2760,7 +2937,70 @@
         }
     }
     renderDonationSettings();
-    const sweepCard = card(ui.pages.daily, '地下城扫荡', 'compass', `一次任务最多 ${CONFIG.sweepMaxTimes} 次，按服务器单次上限自动分批。每批重新核对每日额度、票券和门票条件。`);
+    const giftCard = card(sectionPage(ui.pages.daily, 'gift', '玩家赠送'), '玩家赠送', 'bag', '选择目标好友和服务器列出的可赠道具或装备，预览后确认发送。每 24 小时可赠送一次。');
+    const giftActions = row(giftCard);
+    taskButton(giftActions, '加载赠送列表', 'refresh', '加载赠送列表', loadGiftData);
+    const giftFields = fields(giftCard); giftFields.style.marginTop = '10px';
+    const giftTargetSel = el('select'); giftTargetSel.dataset.gift = 'target'; giftTargetSel.dataset.lockTask = '1';
+    field(giftFields, '目标好友', giftTargetSel, true);
+    const giftItemSel = el('select'); giftItemSel.dataset.gift = 'item'; giftItemSel.dataset.lockTask = '1';
+    field(giftFields, '赠送道具 / 装备', giftItemSel, true);
+    giftTargetSel.onchange = () => {
+        if (!runningTask) { giftState.targetUsername = giftTargetSel.value; clearGiftReview(); }
+        else giftTargetSel.value = giftState.targetUsername;
+    };
+    giftItemSel.onchange = () => {
+        if (!runningTask) { giftState.selectedUuid = giftItemSel.value; clearGiftReview(); }
+        else giftItemSel.value = giftState.selectedUuid;
+    };
+    const giftNote = el('div', 'ah-note'); giftNote.setAttribute('aria-live', 'polite'); giftCard.appendChild(giftNote);
+    const giftPlanNote = el('div', 'ah-sub'); giftCard.appendChild(giftPlanNote);
+    const clearGiftPlanBtn = button(giftActions, '清空日常计划', null, () => {
+        if (runningTask) return;
+        setSetting('giftPlan', {}); clearGiftReview(); renderGiftSettings(); renderPolicySummary();
+    }); clearGiftPlanBtn.dataset.lockTask = '1';
+    giftCard.appendChild(el('div', 'ah-sub', '按游戏规则赠送所选条目，库存数仅供核对，不能指定发送数量。已锁定物品不可选；绑定限制以游戏可赠列表为准。预览后可立即发送，或保存计划并在“日常任务”勾选玩家赠送；冷却时跳过，物品变化或已送出后需重新选择。'));
+    taskButton(row(giftCard), '赠送预览', null, '赠送预览', previewGift, 'primary');
+    const giftReviewBox = el('div'); giftReviewBox.style.marginTop = '10px'; giftReviewBox.setAttribute('aria-live', 'polite'); giftCard.appendChild(giftReviewBox);
+    function renderGiftSettings() {
+        const plan = settings.giftPlan;
+        giftPlanNote.textContent = plan.entryUuid ? `日常计划：${plan.character} → @${plan.targetUsername} · ${plan.itemLabel}${plan.character !== settingsCharacter ? '（来源角色不同，请重新选择并保存）' : ''}` : '尚未保存日常赠送计划。';
+        giftTargetSel.replaceChildren(new Option('选择目标好友…', ''));
+        for (const friend of giftState.friends) {
+            if (friend.username === getCharacter() || friend.username === runtime.status?.username) continue;
+            giftTargetSel.appendChild(new Option(`${friend.remark || friend.name || friend.username} · @${friend.username}`, friend.username));
+        }
+        giftTargetSel.value = giftState.targetUsername;
+        giftItemSel.replaceChildren(new Option('选择赠送条目…', ''));
+        for (const item of giftState.status?.tradeable_items || []) {
+            const option = new Option(`${giftItemLabel(item)}${item.locked ? ' · 已锁定' : ''}`, item.uuid);
+            option.disabled = !!item.locked; giftItemSel.appendChild(option);
+        }
+        giftItemSel.value = giftState.selectedUuid;
+        giftNote.textContent = !giftState.status ? '先加载好友、可赠物品和冷却状态。'
+            : giftState.status.on_cooldown ? `冷却中 · 下次可赠送：${new Date(giftState.status.cooldown_until * 1000).toLocaleString()}`
+                : giftState.status.tradeable_items.some(item => !item.locked) ? '当前可赠送，提交前会再次核对好友、物品和冷却。' : '当前没有可赠送的道具或装备。';
+        renderGiftReview();
+    }
+    function renderGiftReview() {
+        giftReviewBox.replaceChildren();
+        const review = giftState.review;
+        if (!review) return;
+        const box = el('div', 'ah-review');
+        box.append(el('div', 'ah-review-title', `赠送给 ${review.targetName} (@${review.targetUsername})`),
+            el('div', 'ah-sub', `发送角色：${review.character}`), el('div', 'ah-sub', review.itemLabel),
+            el('div', 'ah-note', '确认后按游戏规则发送这个物品条目，并消耗本次赠送机会。'));
+        const actions = row(box); actions.style.marginTop = '10px';
+        const confirm = button(actions, '确认赠送', 'check', () => runTask('玩家赠送', commitGift), 'primary');
+        confirm.dataset.lockTask = '1'; confirm.disabled = !!runningTask;
+        const save = button(actions, '保存日常赠送计划', null, saveDailyGiftPlan);
+        save.dataset.lockTask = '1'; save.disabled = !!runningTask;
+        button(actions, '取消赠送', null, clearGiftReview);
+        giftReviewBox.appendChild(box);
+    }
+    renderGiftSettings();
+
+    const sweepCard = card(sectionPage(ui.pages.daily, 'sweep', '扫荡'), '地下城扫荡', 'compass', `一次任务最多 ${CONFIG.sweepMaxTimes} 次，按服务器单次上限自动分批。每批重新核对每日额度、票券和门票条件。`);
     const sweepFields = fields(sweepCard);
     const sweepPresetSel = selectSetting(sweepFields, 'sweepPreset', '扫荡副本', [['', '选择扫荡副本…']], true);
     numberSetting(sweepFields, 'sweepTimes', '扫荡次数');
@@ -2773,33 +3013,37 @@
         ui.sweepInfo.textContent = `单次请求上限 ${info.max_times} 次 · 今日剩余 ${info.daily_remaining} 次 · 加速券 ${info.ticket_owned} 张 · 每次 ${info.ticket_cost} 张${info.entry_item_cost?.id ? ` · 每次门票 ${info.entry_item_cost.amount}` : ''}。本次计划 ${n} 次（最多 ${CONFIG.sweepMaxTimes} 次，自动分批；每批重新核对）。`;
     });
     taskButton(sweepActions, '执行扫荡', 'play', '地下城扫荡', () => doSweep(settings.sweepPreset, settings.sweepTimes), 'primary');
-    const plotCard = card(ui.pages.daily, '剧情推进', 'log', '按章节顺序执行战斗和剧情脚本。要求胜利的战斗失败后停止。');
+    const plotCard = card(sectionPage(ui.pages.daily, 'plot', '剧情'), '剧情推进', 'log', '按章节顺序执行战斗和剧情脚本。要求胜利的战斗失败后停止。');
     const plotActions = row(plotCard); taskButton(plotActions, '推进可用剧情', 'play', '自动剧情', doAutoPlot); taskButton(plotActions, '查看章节', null, '剧情状态', showPlotStatus);
 
-    const dungeonCard = card(ui.pages.dungeon, '探索计划', 'compass', '可接管已有探索；有其他副本残留时，免费全刷会暂停。');
+    const dungeonPlanPage = sectionPage(ui.pages.dungeon, 'plan', '探索计划');
+    const dungeonTeamPage = sectionPage(ui.pages.dungeon, 'team', '助战站位');
+    const dungeonSpecialPage = sectionPage(ui.pages.dungeon, 'special', '专属策略');
+    const dungeonCard = card(dungeonPlanPage, '探索计划', 'compass', '可接管已有探索；有其他副本残留时，免费全刷会暂停。');
     const dungeonFields = fields(dungeonCard);
     const dungeonPresetSel = selectSetting(dungeonFields, 'dungeonPreset', '探索副本', [['', '选择探索副本…']], true);
     numberSetting(dungeonFields, 'runs', '连续局数');
     selectSetting(dungeonFields, 'difficulty', '难度', SETTING_CHOICES.difficulty.map((d) => [d, d]));
     selectSetting(dungeonFields, 'visibility', '队伍可见性', [['private', '私密'], ['friends', '仅好友'], ['public', '公开']], true);
-    selectSetting(dungeonFields, 'wxtStrategy', '望雪台组队策略', Object.entries(WXT_STRATEGIES).map(([key, strategy]) => [key, strategy.name]), true);
-    selectSetting(dungeonFields, 'wxtDifficulty', '冰龙本事件难度（望雪台）', [['', '跟随上方难度'], ...SETTING_CHOICES.difficulty.map(d => [d, d])], true);
-    dungeonCard.appendChild(el('div', 'ah-sub', '冰龙本难度事件按此选择执行，开启刷目标开局也不会改成简单。设置按角色保存；配队、事件目标与营地休息策略独立生效。'));
-    dungeonCard.appendChild(el('div', 'ah-sub', '火系烬蓟沿用原队友优先级；双光爆破招募 @Ilya、@a，开局目标为晨露草。双贪配置按下方勾选好友优先组队，其余按等级补齐；第二事件选落雪金盏（加碎片），第三事件选霜藏。难度与营地时间沿用已保存设置。'));
-    dungeonCard.appendChild(el('div', 'ah-sub', '自动重开由策略页“望雪台刷目标开局”控制；双贪缺少落雪金盏时，开启则按重开规则处理，关闭则暂停；霜藏缺失或目标不可选时暂停。公开队伍继续等待满员。'));
     ui.dungeonSummary = el('div', 'ah-note'); dungeonCard.appendChild(ui.dungeonSummary);
-    dungeonCard.appendChild(el('div', 'ah-sub', '难度也用于认知晶庭等副本内的难度选择事件；冰龙本可单独指定。按选项名称匹配，不按排列顺序猜测；目标难度缺失、重复或不可选时暂停。'));
+    dungeonCard.appendChild(el('div', 'ah-sub', '难度适用于副本内的难度选择事件，目标缺失或不可选时暂停。望雪台难度与配队在“专属策略”设置，优先好友和排序在“助战站位”设置。'));
     const dungeonActions = row(dungeonCard); dungeonActions.style.marginTop = '12px';
     taskButton(dungeonActions, '接管当前', 'refresh', '接管探索', resumeDungeon);
     taskButton(dungeonActions, '开始探索', 'play', '地下城探索', () => doDungeonRuns(settings.dungeonPreset, settings.visibility, settings.difficulty, settings.runs), 'primary ah-grow');
     const dungeonExtra = row(dungeonCard); dungeonExtra.style.marginTop = '8px';
     taskButton(dungeonExtra, '刷全部免费', null, '免费探索全刷', () => doAllFreeDungeons(settings.visibility, settings.difficulty));
     taskButton(dungeonExtra, '刷新副本', null, '刷新副本', refreshPresets);
-    const hermitCard = card(ui.pages.dungeon, '旧日救援据点默认配置', 'shield');
+    const wxtCard = card(dungeonSpecialPage, '望雪台配置', 'compass', '冰龙本使用独立的事件难度和组队策略，设置按角色保存。');
+    const wxtFields = fields(wxtCard);
+    selectSetting(wxtFields, 'wxtStrategy', '望雪台组队策略', Object.entries(WXT_STRATEGIES).map(([key, strategy]) => [key, strategy.name]), true);
+    selectSetting(wxtFields, 'wxtDifficulty', '冰龙本事件难度（望雪台）', [['', '跟随探索计划难度'], ...SETTING_CHOICES.difficulty.map(d => [d, d])], true);
+    wxtCard.appendChild(el('div', 'ah-sub', '火系烬蓟沿用原队友优先级；双光爆破招募 @Ilya、@a，开局目标为晨露草。双贪配置使用“助战站位”中勾选的好友，其余按等级补齐；第二事件选落雪金盏，第三事件选霜藏。'));
+    wxtCard.appendChild(el('div', 'ah-sub', '刷目标开局在“策略 → 资源止损”开启，按所选难度重开。双贪缺少落雪金盏时，开启则按上限重开，关闭则暂停；霜藏缺失或目标不可选时暂停。营地沿用已保存设置，公开队伍等待满员。'));
+    const hermitCard = card(dungeonSpecialPage, '旧日救援据点默认配置', 'shield');
     toggleSetting(hermitCard, 'hermitDefaults', '启用旧日专属配置');
     hermitCard.appendChild(el('div', 'ah-note', '助战：@ldya → 1 号位，@Guqii0812 → 2 号位，自己 → 3 号位。商店购买全部 Buff / 符文和理智补给；普通营地跳过，Boss 前营地固定休息 100 秒。'));
     hermitCard.appendChild(el('div', 'ah-sub', '仅在旧日救援据点生效，关闭后使用通用配置。私密/仅好友队伍使用指定助战；公开队伍仍等待玩家满员。购买按库存与余额进行，不受单品上限和理智余量限制；“跳过商店”仍生效。'));
-    const friendCard = card(ui.pages.dungeon, '助战好友', 'shield', '私密/仅好友队伍最多优先选择 2 人，其余按等级补齐；望雪台火系保留原候补，双光使用指定账号，双贪使用此处勾选。公开队伍等待玩家加满 3 人后自动开始。');
+    const friendCard = card(dungeonTeamPage, '助战好友', 'shield', '私密/仅好友队伍最多优先选择 2 人，其余按等级补齐；望雪台火系保留原候补，双光使用指定账号，双贪使用此处勾选。公开队伍等待玩家加满 3 人后自动开始。');
     const friendActions = row(friendCard);
     taskButton(friendActions, '加载好友', 'refresh', '加载好友', async () => { const friends = (await api('/social/friends')).data?.friends || []; renderFriendList(friends.filter((f) => !f.offline && f.username)); });
     const clearFriends = button(friendActions, '清空优先', null, () => { preferredFriends.clear(); setSetting('friends', []); for (const cb of friendListBox.querySelectorAll('input')) cb.checked = false; }); clearFriends.dataset.lockTask = '1';
@@ -2821,7 +3065,7 @@
         }
     }
 
-    const orderCard = card(ui.pages.dungeon, '角色站位排序', 'shield', '设置每场战斗的前后顺序，适用于探索、每日挑战和剧情战斗。上方角色优先靠前；未上场者跳过，未指定者按原相对顺序排在后面。');
+    const orderCard = card(dungeonTeamPage, '角色站位排序', 'shield', '设置每场战斗的前后顺序，适用于探索、每日挑战和剧情战斗。上方角色优先靠前；未上场者跳过，未指定者按原相对顺序排在后面。');
     selectSetting(fields(orderCard), 'front', '战斗站位', [['keep', '保留游戏站位'], ['hp', '最大生命值优先'], ['custom', '自定义角色顺序']], true);
     let orderFriends = [];
     const orderActions = row(orderCard);
@@ -2888,7 +3132,7 @@
     }
     renderCharacterOrder();
 
-    const bagCard = card(ui.pages.bag, '装备清理', 'bag', '五星及以上、不可出售/分解装备始终排除。默认另保护已强化及紫色装备；出售和分解先预览再执行。');
+    const bagCard = card(sectionPage(ui.pages.bag, 'cleanup', '装备清理'), '装备清理', 'bag', '五星及以上、不可出售/分解装备始终排除。默认另保护已强化及紫色装备；出售和分解先预览再执行。');
     const bagActions = row(bagCard);
     taskButton(bagActions, '加载背包', 'refresh', '加载背包', async () => { await loadBackpack(); renderBagList(); });
     const selectAll = button(bagActions, '全选可处理项', null, () => {
@@ -2935,7 +3179,7 @@
         confirm.dataset.lockTask = '1'; confirm.disabled = !!runningTask;
         button(actions, '取消', null, () => { bagReview = null; renderBagReview(); }); bagReviewBox.appendChild(box);
     }
-    const reinforceCard = card(ui.pages.bag, '装备强化', 'bolt', '单次只尝试一次；有限连点逐次尝试，成功即停。用券时只尝试一次。');
+    const reinforceCard = card(sectionPage(ui.pages.bag, 'reinforce', '装备强化'), '装备强化', 'bolt', '单次只尝试一次；有限连点逐次尝试，成功即停。用券时只尝试一次。');
     const reinforceFields = fields(reinforceCard);
     const reinforceSel = el('select'); reinforceSel.dataset.lockTask = '1'; reinforceSel.appendChild(new Option('加载背包后选择装备…', '')); field(reinforceFields, '强化目标', reinforceSel, true);
     numberSetting(reinforceFields, 'reinforceAttempts', '最多尝试次数');
@@ -2944,7 +3188,7 @@
     taskButton(reinforceActions, '强化一次', 'bolt', '装备强化', () => doReinforce(reinforceSel.value, voucherCb.checked, 1, reinforceSel.selectedOptions[0]?.dataset.uuid || null));
     taskButton(reinforceActions, '有限连点', 'play', '有限强化', () => doReinforce(reinforceSel.value, voucherCb.checked, settings.reinforceAttempts, reinforceSel.selectedOptions[0]?.dataset.uuid || null), 'primary');
 
-    const budgetCard = card(ui.pages.settings, '本批资源与止损', 'shield', '配置按角色保存。任务启动后使用本次配置，停止后可修改。');
+    const budgetCard = card(sectionPage(ui.pages.settings, 'budget', '资源止损'), '本批资源与止损', 'shield', '配置按角色保存。任务启动后使用本次配置，停止后可修改。');
     const budgetFields = fields(budgetCard);
     numberSetting(budgetFields, 'accelThreshold', '常规加速阈值 / 秒（0 关闭）');
     numberSetting(budgetFields, 'accelBudget', '常规加速用券上限');
@@ -2953,7 +3197,7 @@
     numberSetting(budgetFields, 'restartLimit', '望雪台重开上限');
     toggleSetting(budgetCard, 'rerollWxt', '望雪台刷目标开局');
     budgetCard.appendChild(el('div', 'ah-sub', '刷开局仍按“冰龙本事件难度”选择难度；仅“开始探索”可自动撤离重开，接管与免费全刷不会自动重开。'));
-    const tacticsCard = card(ui.pages.settings, '探索策略', 'compass'); const tacticsFields = fields(tacticsCard);
+    const tacticsCard = card(sectionPage(ui.pages.settings, 'events', '事件路线'), '探索策略', 'compass'); const tacticsFields = fields(tacticsCard);
     selectSetting(tacticsFields, 'eventMode', '未知事件', [['safe', '自动选择（保守优先）'], ['score', '收益关键词优先'], ['pause', '未知事件手动处理']], true);
     selectSetting(tacticsFields, 'eventGoal', '事件目标', [['clear', '保通关 / 理智保护'], ['collect', '材料情报优先']]);
     numberSetting(tacticsFields, 'sanityFloor', '理智保留底线');
@@ -2963,24 +3207,24 @@
         ['普通营地', 'campMode', 'campSeconds', 'campTarget', '用于沿途营地，以及无法确认后续路线的营地。保留原有恢复设置。'],
         ['Boss 前营地', 'bossCampMode', 'bossCampSeconds', 'bossCampTarget', '下一场战斗为 Boss，且中间只有事件、商店或普通宝箱时使用；其他营地、分支或不明节点会中止识别。'],
     ]) {
-        const restCard = card(ui.pages.settings, title, 'heart', description), restFields = fields(restCard);
+        const restCard = card(sectionPage(ui.pages.settings, 'camp', '营地恢复'), title, 'heart', description), restFields = fields(restCard);
         selectSetting(restFields, mode, '休息方式', [['auto', '按队伍状态'], ['fixed', '固定时长'], ['off', '直接离开']], true);
         numberSetting(restFields, seconds, '固定休息 / 秒'); numberSetting(restFields, target, '恢复目标 / %');
         for (const [key, name] of [[mode, '休息方式'], [seconds, '固定休息秒数'], [target, '恢复目标百分比']]) ui.controls[key].setAttribute('aria-label', `${title} · ${name}`);
         restCard.appendChild(el('div', 'ah-sub', '自动模式按 HP/AP 目标等待并核对实际恢复；固定模式按秒数休息。游戏 AP 上限与低理智限制仍生效。'));
     }
-    const shopCard = card(ui.pages.settings, '地下城商店购买', 'bag'); const shopFields = fields(shopCard);
+    const shopCard = card(sectionPage(ui.pages.settings, 'inventory', '商店保护'), '地下城商店购买', 'bag'); const shopFields = fields(shopCard);
     selectSetting(shopFields, 'shop', '购买范围', [['equip_skill', '副本推荐 / 理智补给 / 装备 / 技能'], ['all', '全部类别（旧副本仍排除符文）'], ['off', '跳过商店']], true);
     numberSetting(shopFields, 'shopMaxEach', '每种商品最多购买');
     shopCard.appendChild(el('div', 'ah-sub', '开启旧日专属配置时，购买全部 Buff/符文及理智补给，按库存与余额购买；关闭后恢复必要理智 → Buff/符文 → 装备 → 技能及单品上限。望雪台沿用原策略。'));
     shopCard.appendChild(el('div', 'ah-sub', '通用策略仅在理智不足时购买补给；每次购买后重新读取余额和库存。'));
-    const protectCard = card(ui.pages.settings, '背包保护与同步', 'shield'); const protectFields = fields(protectCard);
+    const protectCard = card(sectionPage(ui.pages.settings, 'inventory', '商店保护'), '背包保护与同步', 'shield'); const protectFields = fields(protectCard);
     const raritySelect = selectSetting(protectFields, 'protectRarity', '保护品质起点', [['3', '蓝色及以上'], ['4', '紫色及以上'], ['5', '五星及以上（强制保留）']], true);
     const originalRarityChange = raritySelect.onchange; raritySelect.onchange = () => { originalRarityChange(); renderBagList(); };
     toggleSetting(protectCard, 'protectReinforced', '保护已强化装备'); toggleSetting(protectCard, 'sync', '任务后同步角色数据');
     protectCard.appendChild(el('div', 'ah-sub', '锁定、五星/六星、不可出售装备不参与批量清理；幸运花饰与修复过的驱动器始终排除。游戏部分页面需手动刷新。'));
 
-    const exportCard = card(ui.pages.settings, '配置导入 / 导出', 'settings', '用 JSON 文件备份或恢复助手设置，包含助战、站位、每日商店范围及旧日专属配置开关。导入到当前角色，预览后应用；文件未包含的设置保留现值。');
+    const exportCard = card(sectionPage(ui.pages.settings, 'backup', '配置备份'), '配置导入 / 导出', 'settings', '用 JSON 文件备份或恢复助手设置，包含助战、站位、商店范围、日常赠送计划及专属配置。导入到当前角色，预览后应用；文件未包含的设置保留现值。跨角色赠送计划需重新选择物品并保存。');
     const configActions = row(exportCard);
     const exportButton = button(configActions, '导出当前角色配置', null, exportSettings);
     exportButton.dataset.lockTask = '1';
@@ -3034,6 +3278,7 @@
             select.value = settings[key];
         }
         for (const cb of friendListBox.querySelectorAll('input')) cb.checked = preferredFriends.has(cb.value);
+        clearGiftReview(); renderGiftSettings();
         renderCharacterOrder(); renderDailyShopList(); renderDonationSettings(); renderBagList();
         ui.sweepInfo.textContent = '配置已导入，请重新查询扫荡额度。';
         ui.routeKey = ''; renderDashboard();
@@ -3184,7 +3429,8 @@
         const name = runtime.presets.find((p) => String(p.id) === String(policy.sweepPreset))?.name;
         ui.dailySummary.textContent = policy.dailySweep ? `日常扫荡已开启 · ${name || '尚未选择副本'} · 最多 ${policy.sweepTimes} 次` : '日常扫荡已关闭，不消耗扫荡票券。';
         ui.dailySummary.textContent += policy.dailyShop ? ' 每日商店已开启，按“每日商店”勾选范围购买。' : ' 每日商店已关闭。';
-        ui.dailySummary.textContent += policy.dailyDonation ? ' 自动捐献已开启，按已保存配置执行一批；未配置时跳过。' : ' 自动捐献已关闭。';
+        ui.dailySummary.textContent += policy.dailyDonation ? ' 建筑捐献已开启，按已保存配置执行一批；未配置时跳过。' : ' 建筑捐献已关闭。';
+        ui.dailySummary.textContent += policy.dailyGift ? ` 玩家赠送已开启：${policy.giftPlan?.entryUuid ? '@' + policy.giftPlan.targetUsername : '尚未保存计划'}，冷却时跳过。` : ' 玩家赠送已关闭。';
         ui.dungeonSummary.textContent = `计划 ${policy.runs} 局 · 连续 ${policy.lossLimit} 局未通关后停止 · ${policy.accelThreshold > 0 ? `常规加速阈值 ${policy.accelThreshold}s，用券上限 ${policy.accelBudget} 张` : '常规加速关闭'} · 600s 超时保护自动加速（不受用券上限限制） · 望雪台：${wxtStrategy(policy).name}${policy.rerollWxt ? ` · 刷${wxtStrategy(policy).opening}` : ''}`;
         if (policy.visibility === 'public') ui.dungeonSummary.textContent += ' · 公开组队：等待满 3 人后自动开始';
         const preset = dungeonPreset({ preset_id: policy.dungeonPreset });
@@ -3221,6 +3467,7 @@
         Object.assign(runtime, { status: null, dungeon: null, presets: [], explorationAllowance: null, phase: character ? '角色已切换，请同步状态' : '请先选择游戏角色', task: '', total: 0, progress: 0, outcome: 'idle', startedAt: 0, endedAt: 0, ...newCounters(), logs: [] });
         backpackItems = []; equippedItems = []; bagReview = null; dailyShopCatalog = []; orderFriends = [];
         donationBuildings = []; donationStatus = null;
+        resetGiftState();
         for (const [key, input] of Object.entries(ui.controls)) { if (input.type === 'checkbox') input.checked = !!settings[key]; else input.value = settings[key]; }
         if (ui.ready) {
             fillPresetSelect(sweepPresetSel, [], true); fillPresetSelect(dungeonPresetSel, []); renderBagList();

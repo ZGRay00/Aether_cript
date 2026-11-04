@@ -12,6 +12,7 @@ jobs:
           node-version: '22'
       - run: node scripts/prepare-release.cjs --check
       - run: node tests/aether-sweep.cjs
+      - run: node tests/aether-audit-regressions.cjs
       - run: node --test tests/refresh-cdn.cjs
       - run: |
           for file in tests/*.cjs; do node --check "$file"; done
