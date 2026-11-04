@@ -28,7 +28,7 @@ async function main() {
             h.setSetting('friends',['ldya','Guqii0812']); h.setSetting('front','custom');
             h.setSetting('characterOrder',['key:ldya','key:Guqii0812','self']);
             h.setSetting('dailyShopOverrides',{'["daily","gem"]':false});
-            h.setSetting('runs',7); h.setSetting('hermitDefaults',false); h.setSetting('wxtDifficulty','极难'); h.setSetting('sweepTimes',20);
+            h.setSetting('runs',7); h.setSetting('hermitDefaults',false); h.setSetting('wxtDifficulty','极难'); h.setSetting('sweepTimes',20); h.setSetting('wxtStrategy','greed');
             h.setSetting('dungeonPreset','valley'); h.setSetting('donationBuilding','saved-building');
             h.setSetting('donationItem','saved-item'); h.setSetting('donationLevel',8);
             h.setSetting('donationType','shared'); h.setSetting('bossCampSeconds',123);
@@ -36,7 +36,7 @@ async function main() {
             HTMLAnchorElement.prototype.click = () => {};
             configButton('导出当前角色配置').click();
             const file=await blob.text(), expected=JSON.stringify(h.settings);
-            h.setSetting('runs',1); h.setSetting('friends',[]); h.setSetting('front','keep'); h.setSetting('wxtDifficulty',''); h.setSetting('sweepTimes',1);
+            h.setSetting('runs',1); h.setSetting('friends',[]); h.setSetting('front','keep'); h.setSetting('wxtDifficulty',''); h.setSetting('sweepTimes',1); h.setSetting('wxtStrategy','fire');
             h.setSetting('characterOrder',[]); h.setSetting('hermitDefaults',true); h.setSetting('dungeonPreset','mine');
             const before=JSON.stringify(h.settings);
             await selectConfig(file);
@@ -45,7 +45,7 @@ async function main() {
             const input=key=>document.querySelector('[data-setting="'+key+'"]');
             return JSON.stringify(h.settings)===expected && localStorage.getItem('aether-helper-v2:观星者')===expected
                 && input('runs').value==='7' && input('front').value==='custom' && !input('hermitDefaults').checked && input('wxtDifficulty').value==='极难'
-                && input('sweepTimes').value==='20' && input('sweepTimes').max==='20'
+                && input('sweepTimes').value==='20' && input('sweepTimes').max==='20' && input('wxtStrategy').value==='greed'
                 && input('dungeonPreset').value==='valley' && input('donationBuilding').value==='saved-building'
                 && input('donationItem').value==='saved-item' && input('bossCampSeconds').value==='123'
                 && document.querySelectorAll('[data-order-key]').length===3 && fixture.calls.length===0;

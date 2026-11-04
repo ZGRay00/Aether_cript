@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.4.0
+// @version      2.4.1
 // @description  Aether 图形控制台：高收益日常、地下城接管与探索、背包分解预览与有限强化；角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.4.0';
+    const VERSION = '2.4.1';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -72,7 +72,7 @@
         campMode: ['auto', 'fixed', 'off'], bossCampMode: ['auto', 'fixed', 'off'], shop: ['equip_skill', 'all', 'off'],
         eventMode: ['safe', 'score', 'pause'], eventGoal: ['clear', 'collect'],
         route: ['first', 'camp', 'treasure', 'boss'], front: ['keep', 'hp', 'custom'],
-        wxtStrategy: ['fire', 'light'],
+        wxtStrategy: ['fire', 'light', 'greed'],
         wxtDifficulty: ['', '简单', '普通', '困难', '极难'],
         donationType: ['quest', 'shared'],
     };
@@ -1482,12 +1482,13 @@
     }
 
     // ---------- 望雪台（冰龙本）专属流程 ----------
-    // 火系保留原招募优先级；双光按账号精确招募指定队友。公开大厅仍走等待满员流程。
+    // 火系保留原招募优先级；双光用指定账号；双贪按用户勾选优先招募。公开大厅仍等待满员。
     // 难度按用户选择；第二事件按策略刷开局，第三事件优先霜藏，撤离权限沿用原规则。
     const WXT_PRESET_RE = /望雪台/;
     const WXT_STRATEGIES = {
         fire: { name: '火系烬蓟', opening: '烬蓟', friends: ['爱神', 'Guqii0812'] },
         light: { name: '双光爆破', opening: '晨露草', friends: ['Ilya', 'a'] },
+        greed: { name: '双贪配置', opening: '落雪金盏', friends: [] },
     };
     const wxtStrategy = (policy = taskSettings()) => WXT_STRATEGIES[policy.wxtStrategy] || WXT_STRATEGIES.fire;
     async function recruitDungeonFriends(dungeon, presetName = '') {
@@ -1517,6 +1518,17 @@
         if (difficulty) return difficulty;
         if (!Array.isArray(opts) || !opts.length) throw new Error('望雪台事件选项为空');
         const text = (o) => `${o?.label || ''} ${o?.description || ''}`;
+        if (policy.wxtStrategy === 'greed') {
+            if (eventNo == null) throw new Error('双贪配置无法确认事件阶段，请核对当前节点后接管');
+            if (eventNo !== 2 && eventNo !== 3) return null;
+            const target = eventNo === 2 ? wxtStrategy(policy).opening : '霜藏';
+            const matches = opts.map((o, index) => text(o).includes(target) ? index : -1).filter(index => index >= 0);
+            if (!matches.length && eventNo === 2 && policy.rerollWxt) return { restart: true, source: 'wxt' };
+            if (matches.length !== 1) throw new Error(`双贪配置第 ${eventNo} 个事件无法唯一选择「${target}」，请手动处理后接管`);
+            const index = matches[0], option = opts[index];
+            if (option.disabled === true || option.locked === true || option.available === false) throw new Error(`双贪配置目标「${target}」当前不可选，请手动处理后接管`);
+            return { index, source: 'wxt' };
+        }
         const opening = opts.findIndex((o) => text(o).includes(wxtStrategy(policy).opening));
         if (opening >= 0) return { index: opening, source: 'wxt' };
         if (eventNo === 2 && policy.rerollWxt) return { restart: true, source: 'wxt' };
@@ -1892,7 +1904,7 @@
                     const ordinal = isWxt ? wxtEventOrdinal(cur, node) : null;
                     const wanted = isWxt ? taskSettings().wxtDifficulty || difficulty : difficulty;
                     let pick = chooseDifficultyEvent(node.event, cur, wanted);
-                    if (!pick && isWxt && (opts.length || ordinal === 1)) {
+                    if (!pick && isWxt && (opts.length || ordinal === 1 || taskSettings().wxtStrategy === 'greed' && [2, 3].includes(ordinal))) {
                         pick = chooseWxtEventOption(opts, ordinal, { ...taskSettings(), difficulty: wanted });
                         if (!pick && ordinal == null && taskSettings().rerollWxt) throw new Error('望雪台事件阶段不明，已暂停刷开局以避免误撤离');
                         if (pick?.restart) {
@@ -2774,7 +2786,8 @@
     selectSetting(dungeonFields, 'wxtStrategy', '望雪台组队策略', Object.entries(WXT_STRATEGIES).map(([key, strategy]) => [key, strategy.name]), true);
     selectSetting(dungeonFields, 'wxtDifficulty', '冰龙本事件难度（望雪台）', [['', '跟随上方难度'], ...SETTING_CHOICES.difficulty.map(d => [d, d])], true);
     dungeonCard.appendChild(el('div', 'ah-sub', '冰龙本难度事件按此选择执行，开启刷目标开局也不会改成简单。设置按角色保存；配队、事件目标与营地休息策略独立生效。'));
-    dungeonCard.appendChild(el('div', 'ah-sub', '火系烬蓟沿用原队友优先级；双光爆破招募 @Ilya、@a，开局目标为晨露草。自动重开仍由策略页“望雪台刷目标开局”控制；公开队伍继续等待满员。'));
+    dungeonCard.appendChild(el('div', 'ah-sub', '火系烬蓟沿用原队友优先级；双光爆破招募 @Ilya、@a，开局目标为晨露草。双贪配置按下方勾选好友优先组队，其余按等级补齐；第二事件选落雪金盏（加碎片），第三事件选霜藏。难度与营地时间沿用已保存设置。'));
+    dungeonCard.appendChild(el('div', 'ah-sub', '自动重开由策略页“望雪台刷目标开局”控制；双贪缺少落雪金盏时，开启则按重开规则处理，关闭则暂停；霜藏缺失或目标不可选时暂停。公开队伍继续等待满员。'));
     ui.dungeonSummary = el('div', 'ah-note'); dungeonCard.appendChild(ui.dungeonSummary);
     dungeonCard.appendChild(el('div', 'ah-sub', '难度也用于认知晶庭等副本内的难度选择事件；冰龙本可单独指定。按选项名称匹配，不按排列顺序猜测；目标难度缺失、重复或不可选时暂停。'));
     const dungeonActions = row(dungeonCard); dungeonActions.style.marginTop = '12px';
@@ -2787,7 +2800,7 @@
     toggleSetting(hermitCard, 'hermitDefaults', '启用旧日专属配置');
     hermitCard.appendChild(el('div', 'ah-note', '助战：@ldya → 1 号位，@Guqii0812 → 2 号位，自己 → 3 号位。商店购买全部 Buff / 符文和理智补给；普通营地跳过，Boss 前营地固定休息 100 秒。'));
     hermitCard.appendChild(el('div', 'ah-sub', '仅在旧日救援据点生效，关闭后使用通用配置。私密/仅好友队伍使用指定助战；公开队伍仍等待玩家满员。购买按库存与余额进行，不受单品上限和理智余量限制；“跳过商店”仍生效。'));
-    const friendCard = card(ui.pages.dungeon, '助战好友', 'shield', '私密/仅好友队伍最多优先选择 2 人，其余按等级补齐；望雪台火系保留原候补，双光使用指定账号。公开队伍等待玩家加满 3 人后自动开始。');
+    const friendCard = card(ui.pages.dungeon, '助战好友', 'shield', '私密/仅好友队伍最多优先选择 2 人，其余按等级补齐；望雪台火系保留原候补，双光使用指定账号，双贪使用此处勾选。公开队伍等待玩家加满 3 人后自动开始。');
     const friendActions = row(friendCard);
     taskButton(friendActions, '加载好友', 'refresh', '加载好友', async () => { const friends = (await api('/social/friends')).data?.friends || []; renderFriendList(friends.filter((f) => !f.offline && f.username)); });
     const clearFriends = button(friendActions, '清空优先', null, () => { preferredFriends.clear(); setSetting('friends', []); for (const cb of friendListBox.querySelectorAll('input')) cb.checked = false; }); clearFriends.dataset.lockTask = '1';
