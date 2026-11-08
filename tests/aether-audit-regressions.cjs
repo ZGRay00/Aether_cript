@@ -65,7 +65,7 @@ function harness() {
             doDungeonRuns, executeCharacterBatch, characterBatch, runtime,
             get settings() { return settings; },
             context(character = 'role-a') {
-                activeTaskContext = { character, settings: { ...settings }, controller: new AbortController(), stopError: new StopError(), accelUsed: 0 };
+                activeTaskContext = { character, settings: { ...settings }, controller: new AbortController(), stopError: new StopError(), ticketsUsed: 0 };
                 return activeTaskContext;
             },
         };
@@ -133,7 +133,7 @@ async function main() {
         await test(`有效扫荡报价 ${JSON.stringify(cost)} 保持正常执行`, async ({ h, fixture, requests }) => {
             fixture.response = request => request.method === 'GET'
                 ? { code: 0, data: { unlocked: true, max_times: 5, daily_remaining: 10, ticket_owned: cost == 0 ? 0 : 10, ticket_cost: cost } }
-                : { code: 0, data: { times: request.body.times } };
+                : { code: 0, data: { times: request.body.times, cost: { ticket_cost: request.body.times * Number(cost) } } };
             assert.equal(await h.doSweep('mine', 5), 5);
             assert.equal(requests.filter(request => request.method === 'POST').length, 1);
         });
