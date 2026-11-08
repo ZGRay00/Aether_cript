@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { sourceUrls, sha256, validatePurge, purge, verify, releasePath } = require('../scripts/refresh-cdn.cjs');
+const { sourceUrls, immutableUrls, sha256, validatePurge, purge, verify, releasePath } = require('../scripts/refresh-cdn.cjs');
 const urls = sourceUrls(fs.readFileSync(path.join(__dirname, '../aether-auto-helper.user.js'), 'utf8'));
 const response = body => new Response(body);
 const valid = () => ({ status: 'finished', paths: { [releasePath]: { throttled: false, providers: { CF: true, FY: true } } } });
@@ -13,6 +13,19 @@ test('all active sources, including Raw, are checked; retired mirror is rejected
     assert.ok(urls.some(url => url.includes('raw.githubusercontent.com')));
     assert.throws(() => sourceUrls("const UPDATE_SOURCES = [{url: 'https://gcore.jsdelivr.net" + releasePath + "'}];"));
     assert.throws(() => sourceUrls('missing'));
+});
+
+test('immutable URLs pin every source to a validated commit in the same repository', () => {
+    const sha = 'a'.repeat(40), pinned = immutableUrls(urls, sha);
+    assert.equal(pinned.length, 3);
+    for (const [i, url] of pinned.entries()) {
+        assert.equal(new URL(url).hostname, new URL(urls[i]).hostname);
+        assert.ok(url.includes('ZGRay00/Aether_cript'));
+        assert.ok(url.includes(sha));
+        assert.ok(!url.includes('@main/') && !url.includes('/main/'));
+    }
+    assert.throws(() => immutableUrls(urls, 'main'));
+    assert.throws(() => immutableUrls(urls, 'invalid'));
 });
 test('HTTP success cannot hide throttling, unfinished purge or failed providers', () => {
     assert.doesNotThrow(() => validatePurge(valid()));

@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
+const { execFileSync } = require('node:child_process');
 const { setTimeout: delay } = require('node:timers/promises');
 
 const releasePath = '/gh/ZGRay00/Aether_cript@main/aether-auto-helper.user.js';
@@ -25,6 +26,10 @@ async function read(url, options = {}, request = fetch) {
     const response = await request(url, { ...options, signal: AbortSignal.timeout(20000), redirect: 'error' });
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
     return Buffer.from(await response.arrayBuffer());
+}
+function immutableUrls(urls, commit) {
+    if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('Invalid release commit');
+    return urls.map(url => url.replace('@main/', `@${commit}/`).replace('/main/', `/${commit}/`));
 }
 function validatePurge(result) {
     const entry = result.paths?.[releasePath];
@@ -75,17 +80,24 @@ async function main() {
         if (!await verify(urls, expected)) throw new Error('At least one update source is stale or unavailable');
         return;
     }
-    for (let attempt = 1; attempt <= 9; attempt++) {
-        console.log(`Refresh attempt ${attempt}/9`);
-        await purge();
-        await delay(10000);
-        if (await verify(urls, expected)) {
-            console.log('All configured sources match the release at this probe location.');
-            return;
-        }
-        if (attempt < 9) await delay(300000); // Respect purge limits; no tight retries.
+    const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path.join(__dirname, '..'), encoding: 'utf8' }).trim();
+    const pinned = immutableUrls(urls, commit);
+    let immutableReady = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        console.log(`Verify immutable release ${commit}, attempt ${attempt}/3`);
+        immutableReady = await verify(pinned, expected);
+        if (immutableReady) break;
+        if (attempt < 3) await delay(10000);
     }
-    throw new Error('Update sources did not converge within the refresh window');
+    if (!immutableReady) throw new Error('At least one immutable update source failed byte verification');
+    // Purge at most once per release. Repeating a throttled purge cannot force edge convergence.
+    await purge();
+    await delay(10000);
+    const mutableReady = await verify(urls, expected);
+    if (!mutableReady) console.warn('::warning::Branch CDN aliases are stale or unavailable; all immutable update sources are verified. The latest-commit updater bypasses branch caches.');
+    const summary = `## Update channel verification\n\nRelease commit: ${commit}\n\n- Immutable CDN / Fastly / Raw: full SHA-256 verified (normal and updater URLs).\n- Branch aliases: ${mutableReady ? 'all verified' : 'stale or unavailable; see per-source logs. Purge acceptance does not prove freshness'}.\n- These results apply to this probe location, not every CDN edge.\n\n[Install this release](${pinned[0]})\n`;
+    console.log(summary);
+    if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
 }
-module.exports = { sourceUrls, sha256, validatePurge, purge, verify, releasePath };
+module.exports = { sourceUrls, immutableUrls, sha256, validatePurge, purge, verify, releasePath };
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

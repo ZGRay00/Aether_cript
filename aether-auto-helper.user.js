@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.6.0
+// @version      2.6.1
 // @description  Aether 图形控制台：高收益日常、玩家赠送、地下城接管与探索、背包分解预览与有限强化；分级菜单、角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.6.0';
+    const VERSION = '2.6.1';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -3302,6 +3302,30 @@
         }
     }
 
+    async function inspectPinnedUpdate() {
+        const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 12000);
+        let commit;
+        try {
+            const response = await fetch(`https://api.github.com/repos/ZGRay00/Aether_cript/git/ref/heads/main?_aether_check=${Date.now()}`, {
+                cache: 'no-store', credentials: 'omit', redirect: 'error', signal: controller.signal,
+            });
+            if (!response.ok) throw new Error(`GitHub 提交查询 HTTP ${response.status}`);
+            const ref = await response.json();
+            if (ref?.ref !== 'refs/heads/main' || ref.object?.type !== 'commit' || !/^[a-f0-9]{40}$/.test(ref.object?.sha || '')) {
+                throw new Error('GitHub 最新提交信息无效');
+            }
+            commit = ref.object.sha;
+        } finally { clearTimeout(timeout); }
+        const results = await Promise.allSettled(UPDATE_SOURCES.map(source => inspectUpdateSource({
+            name: `${source.name} · 固定提交`,
+            url: source.url.replace('@main/', `@${commit}/`).replace('/main/', `/${commit}/`), commit,
+        })));
+        const verified = results.filter(x => x.status === 'fulfilled').map(x => x.value);
+        if (!verified.length) throw new Error('最新提交的固定版本文件均不可访问');
+        if (new Set(verified.map(x => x.version)).size !== 1) throw new Error('固定提交在不同来源返回的版本不一致');
+        return verified[0];
+    }
+
     function resetUpdateButton(delay = 4000) {
         setTimeout(() => {
             if (!checkingUpdate && !pendingUpdate) updateBtn.textContent = '检查更新';
@@ -3338,16 +3362,24 @@
         updateBtn.textContent = '检查中…';
         log(`正在检查更新（当前 v${VERSION}）…`);
         try {
-            const settled = await Promise.allSettled(UPDATE_SOURCES.map(inspectUpdateSource));
+            const sources = [...UPDATE_SOURCES.map(source => ({ name: source.name, inspect: () => inspectUpdateSource(source) })),
+                { name: 'GitHub 最新提交', inspect: inspectPinnedUpdate }];
+            const settled = await Promise.allSettled(sources.map(source => source.inspect()));
+            for (const [i, result] of settled.entries()) if (result.status === 'rejected') {
+                log(`更新源 ${sources[i].name} 检查失败：${result.reason?.message || result.reason}`, 'warn');
+            }
             const available = settled.filter(x => x.status === 'fulfilled').map(x => x.value)
-                .sort((a, b) => compareVersions(b.version, a.version));
+                .sort((a, b) => compareVersions(b.version, a.version) || Number(!!b.commit) - Number(!!a.commit));
             if (!available.length) throw new Error('所有可信更新源均不可访问');
             const latest = available[0];
             const reachable = available.map(x => `${x.name} v${x.version}`).join('；');
             if (compareVersions(latest.version, VERSION) <= 0) {
                 installerWindow?.close();
-                updateBtn.textContent = '已是最新';
-                log(`当前已是最新版本 v${VERSION}（已验证：${reachable}）`);
+                const pinned = available.find(source => source.commit);
+                const confirmed = pinned && compareVersions(pinned.version, VERSION) === 0;
+                updateBtn.textContent = confirmed ? '已是最新' : '暂未发现更新';
+                log(confirmed ? `已核对最新提交 ${pinned.commit.slice(0, 8)}，当前为 v${VERSION}（已验证：${reachable}）`
+                    : `可访问来源中未发现更高版本，但无法确认当前为最新（已验证：${reachable}）。请稍后重试。`, confirmed ? 'info' : 'warn');
                 resetUpdateButton();
                 return;
             }
