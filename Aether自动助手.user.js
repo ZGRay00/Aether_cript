@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.6.2
+// @version      2.6.3
 // @description  Aether 图形控制台：高收益日常、玩家赠送、地下城接管与探索、背包分解预览与有限强化；分级菜单、角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.6.2';
+    const VERSION = '2.6.3';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -48,7 +48,7 @@
     const preferredFriends = new Set(); // 「选助战好友」勾选的好友 username；空 = 招募时全自动按等级选
 
     const DEFAULT_SETTINGS = Object.freeze({
-        dailySweep: false, dailyFreeDungeons: false, dailyShop: true, dailyDonation: true, dailyShopOverrides: {}, sweepTimes: 1, sweepPreset: '', dungeonPreset: '', runs: 1,
+        dailySweep: false, dailyFreeDungeons: false, dailyReinforce: false, dailyReinforcePlan: {}, dailyShop: true, dailyDonation: true, dailyShopOverrides: {}, sweepTimes: 1, sweepPreset: '', dungeonPreset: '', runs: 1,
         visibility: 'private', difficulty: '普通', sweepTicketBudget: 20,
         lossLimit: 1, restartLimit: 10, rerollWxt: false, wxtStrategy: 'fire', wxtDifficulty: '', campAction: 'search',
         shop: 'equip_skill', shopMaxEach: 1, bossCampAction: 'rest',
@@ -75,6 +75,12 @@
     };
     function normalizeSetting(key, value) {
         const fallback = DEFAULT_SETTINGS[key];
+        if (key === 'dailyReinforcePlan') {
+            const keys = ['character', 'uuid', 'name'];
+            if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== keys.length ||
+                keys.some(k => typeof value[k] !== 'string' || !value[k].trim() || value[k].length > 1024)) return {};
+            return { ...value };
+        }
         if (key === 'giftPlan') {
             const keys = ['character', 'targetUsername', 'entryUuid', 'targetName', 'itemLabel', 'fingerprint'];
             if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length) return {};
@@ -716,7 +722,7 @@
         if (!character) { log('请先登录游戏并选择角色', 'warn'); return; }
         clearSettingsImport();
         const ctx = {
-            name, character, settings: { ...settings, friends: [...preferredFriends], characterOrder: [...settings.characterOrder], dailyShopOverrides: { ...settings.dailyShopOverrides }, giftPlan: { ...settings.giftPlan } },
+            name, character, settings: { ...settings, friends: [...preferredFriends], characterOrder: [...settings.characterOrder], dailyShopOverrides: { ...settings.dailyShopOverrides }, giftPlan: { ...settings.giftPlan }, dailyReinforcePlan: { ...settings.dailyReinforcePlan } },
             controller: new AbortController(), stopError: new StopError(),
             dungeonId: null, nodeIndex: null,
         };
@@ -2508,8 +2514,41 @@
         catch (e) { rethrowIfStopped(e); markIssue(`赠送已成功，刷新状态失败：${e.message}`); }
     }
 
+    function dailyReinforcePlan(policy = taskSettings()) {
+        const plan = policy.dailyReinforcePlan;
+        if (!plan?.uuid || !plan.name || plan.character !== (activeTaskContext?.character || getCharacter())) {
+            throw new Error('已开启日常强化，请在“日常任务”中为当前角色加载并选择强化装备');
+        }
+        return plan;
+    }
+    function reinforcementTargets(data) {
+        return [
+            ...(data?.backpack?.equipment || []).filter(item => item?.uuid).map(item => ({ item, source: 'backpack', id: item.uuid })),
+            ...(data?.equipment_slots || []).filter(entry => entry?.item?.uuid && entry.slot)
+                .map(entry => ({ item: entry.item, source: 'equipped', id: entry.slot })),
+        ];
+    }
+    async function doDailyReinforce() {
+        const plan = dailyReinforcePlan();
+        // 每次重新按 UUID 查找真实位置；装备移入背包或换槽后仍只处理用户选中的那一件。
+        const status = (await api('/status')).data;
+        const matches = reinforcementTargets(status).filter(entry => entry.item.uuid === plan.uuid);
+        if (matches.length !== 1) throw new Error('日常强化装备已不存在或无法唯一匹配，请重新加载并选择');
+        const { item, source, id } = matches[0];
+        const data = (await api('/reinforce/attempt', { method: 'POST', body: {
+            source, ...(source === 'backpack' ? { uuid: id } : { slot: id }),
+        } })).data;
+        if (typeof data?.success !== 'boolean') throw new ApiError('日常强化响应缺少结果，请刷新装备核对', 200, 0, '/reinforce/attempt', true);
+        if (data.success) log(`日常强化「${item.name || plan.name}」：成功 +${data.new_level}，本次已尝试 1 次`, 'success');
+        else markIssue(`日常强化「${item.name || plan.name}」：未成功，保底计数 ${data.pity ?? '?'}；已尝试 1 次，不再重试`);
+    }
+
     async function doDailyAll(sweepPresetId, sweepTimes = 1, includeSweep = false) {
-        const steps = [['邮件领取', doMail], ['每日战斗', doDaily], ['活动处理', () => doEvents()]];
+        // 先验证必选配置，避免运行其他日常后才发现没有指定装备。
+        if (taskSettings().dailyReinforce) dailyReinforcePlan();
+        const steps = [['邮件领取', doMail], ['每日战斗', doDaily]];
+        if (taskSettings().dailyReinforce) steps.push(['强化装备 1 次', doDailyReinforce]);
+        steps.push(['活动处理', () => doEvents()]);
         if (includeSweep) {
             if (!sweepPresetId) throw new Error('已开启日常扫荡，请先选择副本');
             steps.push(['地下城扫荡', () => doSweep(sweepPresetId, sweepTimes)]);
@@ -2806,6 +2845,46 @@
     toggleSetting(dailyCard, 'dailyShop', '一键日常包含每日商店');
     toggleSetting(dailyCard, 'dailyDonation', '一键日常包含建筑捐献');
     toggleSetting(dailyCard, 'dailyGift', '一键日常包含玩家赠送');
+    const dailyReinforceToggle = toggleSetting(dailyCard, 'dailyReinforce', '强化装备 1 次');
+    const dailyReinforceBox = el('div'); dailyCard.appendChild(dailyReinforceBox);
+    const dailyReinforceSelect = el('select'); dailyReinforceSelect.dataset.lockTask = '1'; dailyReinforceSelect.dataset.dailyReinforce = 'target';
+    field(fields(dailyReinforceBox), '日常强化装备（必选）', dailyReinforceSelect, true);
+    taskButton(row(dailyReinforceBox), '加载强化装备', 'refresh', '加载强化装备', async () => { await loadBackpack(); renderBagList(); });
+    dailyReinforceBox.appendChild(el('div', 'ah-sub', '每次启动日常仅尝试一次普通强化，消耗以游戏规则为准，不使用强化券；失败不重试。按角色保存所选装备，装备丢失时跳过并提示。'));
+    dailyReinforceSelect.onchange = () => {
+        if (!runningTask) {
+            const item = reinforcementTargets({ backpack: { equipment: backpackItems }, equipment_slots: equippedItems })
+                .find(entry => entry.item.uuid === dailyReinforceSelect.value)?.item;
+            setSetting('dailyReinforcePlan', item ? { character: settingsCharacter, uuid: item.uuid, name: item.name || item.uuid } : {});
+            renderPolicySummary();
+        }
+        renderDailyReinforceSettings();
+    };
+    const dailyReinforceChange = dailyReinforceToggle.onchange;
+    dailyReinforceToggle.onchange = () => {
+        dailyReinforceChange(); renderDailyReinforceSettings();
+        if (settings.dailyReinforce && !settings.dailyReinforcePlan.uuid) {
+            log('请加载并选择日常强化装备，选择后才能开始日常', 'warn'); dailyReinforceSelect.focus();
+        }
+    };
+    function renderDailyReinforceSettings() {
+        dailyReinforceBox.hidden = !settings.dailyReinforce;
+        dailyReinforceSelect.required = !!settings.dailyReinforce;
+        dailyReinforceSelect.replaceChildren(new Option('请选择强化装备…', ''));
+        for (const { item, source } of reinforcementTargets({ backpack: { equipment: backpackItems }, equipment_slots: equippedItems })) {
+            dailyReinforceSelect.appendChild(new Option(`[${source === 'equipped' ? '已装备' : '背包'}] ${item.name || item.uuid} +${item.reinforce_level || 0}`, item.uuid));
+        }
+        const plan = settings.dailyReinforcePlan;
+        if (plan.uuid && ![...dailyReinforceSelect.options].some(option => option.value === plan.uuid)) {
+            dailyReinforceSelect.appendChild(new Option(`已保存：${plan.name}（执行前核对）`, plan.uuid));
+        }
+        dailyReinforceSelect.value = plan.uuid || '';
+        if (plan.uuid && plan.character !== settingsCharacter) {
+            dailyReinforceSelect.value = '';
+            dailyReinforceSelect.options[0].textContent = '配置来自其他角色，请重新选择装备…';
+        }
+    }
+    renderDailyReinforceSettings();
     dailyCard.appendChild(el('div', 'ah-sub', '每日免费副本按探索中的难度与组队设置执行，每个当日可免费进入的副本一局。有未结束探索时跳过并提示；无免费额度时不新建探索。'));
     ui.dailySummary = el('div', 'ah-summary'); dailyCard.appendChild(ui.dailySummary);
     const dailyActions = row(dailyCard); dailyActions.style.marginTop = '12px';
@@ -3144,7 +3223,7 @@
             option.dataset.uuid = i.item.uuid || ''; reinforceSel.appendChild(option);
         }
         if ([...reinforceSel.options].some((o) => o.value === previous)) reinforceSel.value = previous;
-        renderBagCount();
+        renderBagCount(); renderDailyReinforceSettings();
     }
     function renderBagReview() {
         bagReviewBox.replaceChildren(); if (!bagReview) return;
@@ -3445,6 +3524,7 @@
         const name = runtime.presets.find((p) => String(p.id) === String(policy.sweepPreset))?.name;
         summaryRows(ui.dailySummary, [
             ['扫荡', policy.dailySweep ? `${name || '尚未选择副本'} · 最多 ${policy.sweepTimes} 次 · 用券上限 ${policy.sweepTicketBudget} 张` : '未开启', !policy.dailySweep],
+            ['强化', policy.dailyReinforce ? `${policy.dailyReinforcePlan?.name || '尚未选择装备'} · 普通强化 1 次` : '未开启', !policy.dailyReinforce],
             ['免费副本', policy.dailyFreeDungeons ? `每个免费副本一局 · 按探索难度与组队策略` : '未开启', !policy.dailyFreeDungeons],
             ['商店', policy.dailyShop ? '按所选商品范围购买' : '未开启', !policy.dailyShop],
             ['捐献', policy.dailyDonation ? '按保存的建筑材料执行，冷却时跳过' : '未开启', !policy.dailyDonation],

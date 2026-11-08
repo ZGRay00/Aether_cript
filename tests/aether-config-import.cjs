@@ -29,7 +29,7 @@ async function main() {
             h.setSetting('characterOrder',['key:ldya','key:Guqii0812','self']);
             h.setSetting('dailyShopOverrides',{'["daily","gem"]':false});
             h.setSetting('runs',999); h.setSetting('sweepTicketBudget',999); h.setSetting('hermitDefaults',false); h.setSetting('wxtDifficulty','极难'); h.setSetting('sweepTimes',20); h.setSetting('wxtStrategy','greed');
-            h.setSetting('dailyFreeDungeons',true); h.setSetting('dailyGift',true); h.setSetting('giftPlan',{character:'观星者',targetUsername:'friend-a',entryUuid:'gift-1',targetName:'好友',itemLabel:'测试装备',fingerprint:JSON.stringify({uuid:'gift-1',name:'测试装备'})});
+            h.setSetting('dailyReinforce',true);h.setSetting('dailyReinforcePlan',{character:'观星者',uuid:'a',name:'测试装备'});h.setSetting('dailyFreeDungeons',true); h.setSetting('dailyGift',true); h.setSetting('giftPlan',{character:'观星者',targetUsername:'friend-a',entryUuid:'gift-1',targetName:'好友',itemLabel:'测试装备',fingerprint:JSON.stringify({uuid:'gift-1',name:'测试装备'})});
             h.setSetting('dungeonPreset','valley'); h.setSetting('donationBuilding','saved-building');
             h.setSetting('donationItem','saved-item'); h.setSetting('donationLevel',8);
             h.setSetting('donationType','shared'); h.setSetting('bossCampAction','search');
@@ -39,7 +39,7 @@ async function main() {
             const file=await blob.text(), expected=JSON.stringify(h.settings);
             h.setSetting('runs',1); h.setSetting('friends',[]); h.setSetting('front','keep'); h.setSetting('wxtDifficulty',''); h.setSetting('sweepTimes',1); h.setSetting('wxtStrategy','fire');
             h.setSetting('characterOrder',[]); h.setSetting('hermitDefaults',true); h.setSetting('dungeonPreset','mine');
-            h.setSetting('dailyFreeDungeons',false); h.setSetting('dailyGift',false); h.setSetting('giftPlan',{});
+            h.setSetting('dailyReinforce',false);h.setSetting('dailyReinforcePlan',{});h.setSetting('dailyFreeDungeons',false); h.setSetting('dailyGift',false); h.setSetting('giftPlan',{});
             const before=JSON.stringify(h.settings);
             await selectConfig(file);
             if(JSON.stringify(h.settings)!==before) return false;
@@ -47,7 +47,7 @@ async function main() {
             const input=key=>document.querySelector('[data-setting="'+key+'"]');
             return JSON.stringify(h.settings)===expected && localStorage.getItem('aether-helper-v2:观星者')===expected
                 && input('runs').value==='999' && input('runs').max==='999' && input('front').value==='custom' && !input('hermitDefaults').checked && input('wxtDifficulty').value==='极难'
-                && input('dailyFreeDungeons').checked && input('dailyGift').checked && h.settings.giftPlan.entryUuid==='gift-1'
+                && input('dailyReinforce').checked && document.querySelector('[data-daily-reinforce=target]').value==='a' && input('dailyFreeDungeons').checked && input('dailyGift').checked && h.settings.giftPlan.entryUuid==='gift-1'
                 && input('sweepTimes').value==='20' && input('sweepTimes').max==='20' && input('wxtStrategy').value==='greed'
                 && input('dungeonPreset').value==='valley' && input('donationBuilding').value==='saved-building'
                 && input('donationItem').value==='saved-item' && input('bossCampAction').value==='search'
@@ -75,7 +75,7 @@ async function main() {
         await test('无效 JSON、版本、字段类型、数值越界均不修改配置', `
             const before=JSON.stringify(h.settings), saved=localStorage.getItem('aether-helper-v2:观星者');
             for(const file of ['{',null,[],{...configFile({runs:2}),schemaVersion:2},configFile({}),
-                configFile({sweepTicketBudget:1000}),configFile({sweepTicketBudget:-1}),configFile({campAction:'auto'}),configFile({bossCampAction:'off'}),configFile({runs:1000}),configFile({sweepTimes:21}),configFile({dailyFreeDungeons:'true'}),configFile({dailySweep:'false'}),configFile({friends:['a','b','c']}),configFile({wxtDifficulty:'invalid'}),configFile({giftPlan:{targetUsername:'incomplete'}}),
+                configFile({sweepTicketBudget:1000}),configFile({sweepTicketBudget:-1}),configFile({campAction:'auto'}),configFile({bossCampAction:'off'}),configFile({runs:1000}),configFile({sweepTimes:21}),configFile({dailyFreeDungeons:'true'}),configFile({dailyReinforce:'true'}),configFile({dailyReinforcePlan:{character:'观星者',uuid:'a'}}),configFile({dailyReinforcePlan:{character:'观星者',uuid:'',name:'装备'}}),configFile({dailySweep:'false'}),configFile({friends:['a','b','c']}),configFile({wxtDifficulty:'invalid'}),configFile({giftPlan:{targetUsername:'incomplete'}}),
                 configFile({characterOrder:['invalid']}),configFile({dailyShopOverrides:{bad:1}}),configFile({protectRarity:6})]) {
                 await selectConfig(JSON.stringify(file));
                 if(configButton('应用到当前角色') || JSON.stringify(h.settings)!==before) return false;

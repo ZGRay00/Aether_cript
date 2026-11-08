@@ -53,6 +53,22 @@ async function main() {
             await fixture.clickTask('开始多角色任务');
             return JSON.stringify(fixture.plans)===JSON.stringify([['role-a','mine','friends','困难',1,true],['role-a','valley','friends','困难',1,true]])&&h.characterBatch.results.every(x=>x.outcome==='success');
         `);
+        await test('多角色日常各强化所选装备一次且不污染前台背包', `
+            for(const role of fixture.characters){const key='aether-helper-v2:'+role.username;localStorage.setItem(key,JSON.stringify({...JSON.parse(localStorage.getItem(key)),dailyReinforce:true,dailyReinforcePlan:{character:role.username,uuid:role.username+'-gear',name:'武器'}}))}
+            const before=document.querySelector('[data-daily-reinforce=target]').innerHTML,base=fixture.handler,attempts=[];
+            fixture.handler=r=>{const char=r.query._aether_character;if(r.path==='/status'){const result=base(r);result.data.backpack.equipment=[{uuid:char+'-gear',name:'武器'}];return result}if(r.path==='/reinforce/attempt'){attempts.push([char,r.body]);return{code:0,data:{success:true,new_level:1}}}return base(r)};
+            await fixture.clickTask('开始多角色任务');
+            return JSON.stringify(attempts)===JSON.stringify(fixture.characters.map(c=>[c.username,{source:'backpack',uuid:c.username+'-gear'}]))&&h.characterBatch.results.every(x=>x.outcome==='success')&&document.querySelector('[data-daily-reinforce=target]').innerHTML===before;
+        `);
+        await test('多角色日常缺少强化选择时结束本角色并继续下一角色', `
+            const key='aether-helper-v2:role-a';localStorage.setItem(key,JSON.stringify({...JSON.parse(localStorage.getItem(key)),dailyReinforce:true}));
+            await fixture.clickTask('开始多角色任务');return h.characterBatch.results[0].outcome==='error'&&h.characterBatch.results[1].outcome==='success'&&fixture.donated.length===1&&fixture.donated[0].char==='角色乙'&&!fixture.calls.some(r=>r.path==='/reinforce/attempt');
+        `);
+        await test('多角色强化响应不确定时停止整批', `
+            const key='aether-helper-v2:role-a';localStorage.setItem(key,JSON.stringify({...JSON.parse(localStorage.getItem(key)),dailyReinforce:true,dailyReinforcePlan:{character:'role-a',uuid:'a',name:'武器'}}));
+            const base=fixture.handler;fixture.handler=r=>{if(r.path==='/status'){const result=base(r);result.data.backpack.equipment=[{uuid:'a',name:'武器'}];return result}if(r.path==='/reinforce/attempt')return{networkError:true};return base(r)};
+            await fixture.clickTask('开始多角色任务');return h.runtime.outcome==='error'&&h.characterBatch.results[1].outcome==='pending'&&fixture.donated.length===0&&fixture.calls.filter(r=>r.path==='/reinforce/attempt').length===1;
+        `);
         await test('身份不匹配停止整批且不提交写请求', `const base=fixture.handler;fixture.handler=r=>r.path==='/status'?{code:0,data:{username:'wrong'}}:base(r);await fixture.clickTask('开始多角色任务');return h.runtime.outcome==='error'&&fixture.donated.length===0&&h.characterBatch.results[0].outcome==='error'&&h.characterBatch.results[1].outcome==='pending'`);
         await test('角色被解绑时停止整批', `fixture.characters=[];await fixture.clickTask('开始多角色任务');return h.runtime.outcome==='error'&&fixture.donated.length===0`);
         await test('日常普通错误记录警告后继续下一角色', `const base=fixture.handler;fixture.handler=r=>r.path.endsWith('/quest')&&r.query._aether_character==='role-a'?{code:400,http:400,message:'材料不足'}:base(r);await fixture.clickTask('开始多角色任务');return h.runtime.outcome==='partial'&&h.characterBatch.results[0].outcome==='partial'&&h.characterBatch.results[1].outcome==='success'&&fixture.donated.length===1`);
