@@ -32,7 +32,7 @@ async function main() {
             h.setSetting('dailyGift',true); h.setSetting('giftPlan',{character:'观星者',targetUsername:'friend-a',entryUuid:'gift-1',targetName:'好友',itemLabel:'测试装备',fingerprint:JSON.stringify({uuid:'gift-1',name:'测试装备'})});
             h.setSetting('dungeonPreset','valley'); h.setSetting('donationBuilding','saved-building');
             h.setSetting('donationItem','saved-item'); h.setSetting('donationLevel',8);
-            h.setSetting('donationType','shared'); h.setSetting('bossCampSeconds',123);
+            h.setSetting('donationType','shared'); h.setSetting('bossCampAction','search');
             let blob; URL.createObjectURL = value => {blob=value;return 'blob:test';};
             HTMLAnchorElement.prototype.click = () => {};
             configButton('导出当前角色配置').click();
@@ -50,7 +50,7 @@ async function main() {
                 && input('dailyGift').checked && h.settings.giftPlan.entryUuid==='gift-1'
                 && input('sweepTimes').value==='20' && input('sweepTimes').max==='20' && input('wxtStrategy').value==='greed'
                 && input('dungeonPreset').value==='valley' && input('donationBuilding').value==='saved-building'
-                && input('donationItem').value==='saved-item' && input('bossCampSeconds').value==='123'
+                && input('donationItem').value==='saved-item' && input('bossCampAction').value==='search'
                 && document.querySelectorAll('[data-order-key]').length===3 && fixture.calls.length===0;
         `);
         await test('2.0.16 文件可跨角色导入；缺项保留、未知字段不保存', `
@@ -62,10 +62,16 @@ async function main() {
             return h.settings.runs===9 && h.settings.hermitDefaults===false && !Object.hasOwn(h.settings,'futureField')
                 && localStorage.getItem('aether-helper-v2:其他角色')===null;
         `);
+        await test('旧营地备份忽略计时字段，保留当前新动作', `
+            h.setSetting('campAction','rest'); h.setSetting('bossCampAction','search');
+            await selectConfig(configFile({runs:2,campMode:'fixed',campSeconds:100,bossCampMode:'off',bossCampTarget:90}));
+            configButton('应用到当前角色').click();
+            return h.settings.runs===2&&h.settings.campAction==='rest'&&h.settings.bossCampAction==='search'&&!Object.hasOwn(h.settings,'campMode');
+        `);
         await test('无效 JSON、版本、字段类型、数值越界均不修改配置', `
             const before=JSON.stringify(h.settings), saved=localStorage.getItem('aether-helper-v2:观星者');
             for(const file of ['{',null,[],{...configFile({runs:2}),schemaVersion:2},configFile({}),
-                configFile({runs:1000}),configFile({sweepTimes:21}),configFile({dailySweep:'false'}),configFile({friends:['a','b','c']}),configFile({wxtDifficulty:'invalid'}),configFile({giftPlan:{targetUsername:'incomplete'}}),
+                configFile({campAction:'auto'}),configFile({bossCampAction:'off'}),configFile({runs:1000}),configFile({sweepTimes:21}),configFile({dailySweep:'false'}),configFile({friends:['a','b','c']}),configFile({wxtDifficulty:'invalid'}),configFile({giftPlan:{targetUsername:'incomplete'}}),
                 configFile({characterOrder:['invalid']}),configFile({dailyShopOverrides:{bad:1}}),configFile({protectRarity:6})]) {
                 await selectConfig(JSON.stringify(file));
                 if(configButton('应用到当前角色') || JSON.stringify(h.settings)!==before) return false;

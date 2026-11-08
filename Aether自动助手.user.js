@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.5.0
+// @version      2.5.1
 // @description  Aether 图形控制台：高收益日常、玩家赠送、地下城接管与探索、背包分解预览与有限强化；分级菜单、角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.5.0';
+    const VERSION = '2.5.1';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -50,9 +50,8 @@
     const DEFAULT_SETTINGS = Object.freeze({
         dailySweep: false, dailyShop: true, dailyDonation: true, dailyShopOverrides: {}, sweepTimes: 1, sweepPreset: '', dungeonPreset: '', runs: 1,
         visibility: 'private', difficulty: '普通', accelThreshold: 0, accelBudget: 3,
-        lossLimit: 1, restartLimit: 10, rerollWxt: false, wxtStrategy: 'fire', wxtDifficulty: '', campMode: 'auto', campSeconds: 60,
-        campTarget: 90, shop: 'equip_skill', shopMaxEach: 1,
-        bossCampMode: 'auto', bossCampSeconds: 60, bossCampTarget: 100,
+        lossLimit: 1, restartLimit: 10, rerollWxt: false, wxtStrategy: 'fire', wxtDifficulty: '', campAction: 'search',
+        shop: 'equip_skill', shopMaxEach: 1, bossCampAction: 'rest',
         eventMode: 'safe', eventGoal: 'clear', sanityFloor: 10, route: 'first', front: 'keep', characterOrder: [],
         protectRarity: 4, protectReinforced: true, reinforceAttempts: 5, friends: [], sync: true,
         donationBuilding: '', donationType: 'quest', donationItem: '', donationLevel: 0,
@@ -61,14 +60,13 @@
     });
     const NUMBER_LIMITS = {
         sweepTimes: [1, CONFIG.sweepMaxTimes], runs: [1, 999], accelThreshold: [0, 3600], accelBudget: [0, 999],
-        lossLimit: [1, 10], restartLimit: [0, 30], campSeconds: [0, 300], campTarget: [1, 100],
-        bossCampSeconds: [0, 300], bossCampTarget: [1, 100],
+        lossLimit: [1, 10], restartLimit: [0, 30],
         shopMaxEach: [1, 10], sanityFloor: [0, 20], protectRarity: [3, 5], reinforceAttempts: [1, 50],
         donationLevel: [0, 1000000], donationQuantity: [1, 1000000], donationTimes: [1, 100],
     };
     const SETTING_CHOICES = {
         visibility: ['private', 'friends', 'public'], difficulty: ['简单', '普通', '困难', '极难'],
-        campMode: ['auto', 'fixed', 'off'], bossCampMode: ['auto', 'fixed', 'off'], shop: ['equip_skill', 'all', 'off'],
+        campAction: ['search', 'rest'], bossCampAction: ['search', 'rest'], shop: ['equip_skill', 'all', 'off'],
         eventMode: ['safe', 'score', 'pause'], eventGoal: ['clear', 'collect'],
         route: ['first', 'camp', 'treasure', 'boss'], front: ['keep', 'hp', 'custom'],
         wxtStrategy: ['fire', 'light', 'greed'],
@@ -120,10 +118,7 @@
         const saved = readStorage(`aether-helper-v2:${character}`, {});
         const values = Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([key, value]) =>
             [key, normalizeSetting(key, saved && typeof saved === 'object' && Object.hasOwn(saved, key) ? saved[key] : value)]));
-        // 旧版只有一组营地设置：未单独配置 Boss 营地的项继承旧值，之后独立保存。
-        for (const [next, previous] of [['bossCampMode', 'campMode'], ['bossCampSeconds', 'campSeconds'], ['bossCampTarget', 'campTarget']]) {
-            if (saved && typeof saved === 'object' && !Object.hasOwn(saved, next) && Object.hasOwn(saved, previous)) values[next] = values[previous];
-        }
+        // 旧版营地秒数、百分比与开关已失效；新动作分别默认搜索 / 修整，不继承旧语义。
         return values;
     }
     function loadSettings(character = getCharacter()) {
@@ -349,6 +344,14 @@
                 if (!latest || latest.node_type !== 'event' || latest.index != null && latest.index !== ctx.nodeIndex) throw new Error('提交前事件节点已变化，请重新接管');
                 if (nodeResolved(latest)) return { code: 0, data: current }; // 其他页面已选，不重复提交。
                 if (JSON.stringify(latest.event) !== JSON.stringify(options.expectedEvent)) throw new Error('提交前事件选项已变化，请重新接管');
+            }
+            if (options.expectedCamp) {
+                const latest = (await api('/dungeon/node')).data;
+                if (!latest || latest.node_type !== 'camp' || latest.index != null && latest.index !== ctx.nodeIndex ||
+                    latest.completed || latest.camp_choice != null ||
+                    (latest.camp_enter_time ?? null) !== options.expectedCamp.enterTime) {
+                    throw new Error('提交前营地状态已变化，请重新接管');
+                }
             }
         }
         for (let attempt = 0; ; attempt++) {
@@ -1727,8 +1730,7 @@
     function dungeonPolicy(dungeon = runtime.dungeon, policy = taskSettings()) {
         if (!hermitDefaultsEnabled(dungeon, policy)) return { ...policy, lineupDungeon: dungeon };
         return { ...policy, lineupDungeon: dungeon, requireExactOrder: dungeon?.visibility !== 'public',
-            front: 'custom', characterOrder: ['key:ldya', 'key:Guqii0812', 'self'],
-            campMode: 'off', bossCampMode: 'fixed', bossCampSeconds: 100 };
+            front: 'custom', characterOrder: ['key:ldya', 'key:Guqii0812', 'self'] };
     }
     // 返回 'crystal' | 'buff' | 'rune' | 'equip' | 'skill' | 'other'。
     // 已知装备和技能书先按实际类型识别，避免描述里的“增益”抢占购买优先级。
@@ -1821,78 +1823,44 @@
         return 'normal';
     }
     function campPolicy(dungeon, node, policy = taskSettings()) {
-        policy = dungeonPolicy(dungeon, policy);
-        const kind = campKind(dungeon, node);
-        return { ...policy, kind, label: kind === 'boss' ? 'Boss 前营地' : '普通营地',
-            campMode: kind === 'boss' ? policy.bossCampMode ?? policy.campMode : policy.campMode,
-            campSeconds: kind === 'boss' ? policy.bossCampSeconds ?? policy.campSeconds : policy.campSeconds,
-            campTarget: kind === 'boss' ? policy.bossCampTarget ?? policy.campTarget : policy.campTarget };
-    }
-    function campRecoveryRows(dungeon, policy = taskSettings()) {
-        const members = dungeon?.members;
-        if (!Array.isArray(members) || !members.length) throw new Error('营地队伍状态缺失，已暂停恢复');
-        const target = natural(policy.campTarget, 90, 100) / 100;
-        return members.map((member) => {
-            const status = dungeon.member_status?.[member.key];
-            const maxHp = member.max_hp, maxAp = member.max_ap;
-            const cap = dungeon.camp_ap_caps?.[member.key];
-            if (!Number.isFinite(maxHp) || maxHp <= 0 || !Number.isFinite(maxAp) || maxAp < 0 ||
-                !Number.isFinite(status?.hp) || status.hp < 0 || !Number.isFinite(status?.ap) || status.ap < 0 ||
-                cap != null && (!Number.isFinite(cap) || cap < 0)) {
-                throw new Error(`营地成员「${member.name || member.key}」HP/AP 或上限数据异常，已暂停恢复`);
-            }
-            const hpTarget = Math.min(maxHp, Math.ceil(maxHp * target)), apGoal = Math.min(maxAp, Math.ceil(maxAp * target));
-            const apTarget = Math.min(apGoal, cap ?? Infinity);
-            return { key: member.key, name: member.name || member.key, hp: status.hp, ap: status.ap,
-                maxHp, maxAp, hpTarget, apTarget, apLimited: cap != null && cap < apGoal };
-        });
-    }
-    function campWait(dungeon, node, policy = taskSettings()) {
-        if (policy.campMode === 'off') return 0;
-        const elapsed = node?.camp_enter_time ? Math.max(0, Date.now() / 1000 - node.camp_enter_time) : 0;
-        const limit = natural(policy.campSeconds, 60, 300);
-        if (policy.campMode === 'fixed') return Math.max(0, Math.ceil(limit - elapsed));
-        let seconds = 0;
-        for (const row of campRecoveryRows(dungeon, policy)) {
-            seconds = Math.max(seconds, (row.hpTarget - row.hp) / row.maxHp * 100);
-            if (row.maxAp > 0) seconds = Math.max(seconds, (row.apTarget - row.ap) / row.maxAp * 100);
-        }
-        // 官网每秒恢复最大 HP/AP 的 1%；自动模式以目标为准，不截到固定模式的 60 秒。
-        // 当前快照可能已结算部分恢复，接管时不再扣 elapsed，以免重复扣除等待时间。
-        // 留出一个整秒的结算余量，已达标则无需再等。
-        return seconds > 0 ? Math.ceil(seconds) + 1 : 0;
+        const kind = campKind(dungeon, node), key = kind === 'boss' ? 'bossCampAction' : 'campAction';
+        return { kind, label: kind === 'boss' ? 'Boss 前营地' : '普通营地', action: normalizeSetting(key, policy[key]) };
     }
     async function handleCampNode(dungeon, node) {
-        const policy = campPolicy(dungeon, node), automatic = policy.campMode === 'auto';
-        log(`${policy.label}：${automatic ? `恢复目标 ${policy.campTarget}%` : policy.campMode === 'fixed' ? `固定休息 ${policy.campSeconds} 秒` : '直接离开'}`);
-        if (automatic) campRecoveryRows(dungeon, policy);
-        if (!node.camp_enter_time) await api('/dungeon/node/camp/enter', { method: 'POST' });
-        const snapshot = automatic ? await fetchCurrentDungeon() : dungeon;
-        if (!snapshot || snapshot.dungeon_id !== dungeon.dungeon_id || snapshot.status !== 'exploring' ||
-            snapshot.current_node_index !== dungeon.current_node_index) throw new Error('进入营地后探索已变化，请重新接管');
-        if (automatic) {
-            for (const row of campRecoveryRows(snapshot, policy)) {
-                if (row.apLimited) log(`${row.name}：沿用游戏 AP 上限 ${row.apTarget}，本次 AP 目标受该上限限制`);
+        const policy = campPolicy(dungeon, node), label = policy.action === 'rest' ? '修整' : '搜索';
+        const assertCamp = (current, latest) => {
+            if (!current || current.dungeon_id !== dungeon.dungeon_id || current.status !== 'exploring' ||
+                current.current_node_index !== dungeon.current_node_index || current.leader_id !== dungeon.leader_id ||
+                !latest || latest.node_type !== 'camp' || latest.index != null && latest.index !== dungeon.current_node_index) {
+                throw new Error('营地所属探索、队长或节点已变化，请重新接管');
             }
-            if (Number.isFinite(snapshot.sanity) && snapshot.sanity < 10) log('当前理智低于 10，游戏存在最大生命惩罚；营地不会恢复理智', 'warn');
+        };
+        let current = await fetchCurrentDungeon(), latest = (await api('/dungeon/node')).data;
+        assertCamp(current, latest);
+        if (latest.completed) return current;
+        if (latest.camp_choice != null) throw new Error('营地行动已提交但尚未完成，请稍后接管');
+        log(`${policy.label}：${label}，进入后立即选择行动`);
+        if (!latest.camp_enter_time) {
+            await api('/dungeon/node/camp/enter', { method: 'POST', expectedCamp: { enterTime: latest.camp_enter_time ?? null } });
+            current = await fetchCurrentDungeon(); latest = (await api('/dungeon/node')).data;
+            assertCamp(current, latest);
+            if (latest.completed) return current;
         }
-        const seconds = campWait(snapshot, node, policy);
-        if (seconds > 0) {
-            runtime.phase = `${policy.label}恢复 · ${seconds}s`;
-            log(automatic ? `${policy.label}：按 HP/AP 目标 ${policy.campTarget}% 等待约 ${seconds} 秒（含结算余量）` : `${policy.label}：固定休息剩余 ${seconds} 秒`);
-            await waitSeconds(seconds);
+        if (!Number.isFinite(latest.camp_enter_time) || latest.camp_enter_time <= 0 || latest.camp_choice != null) {
+            throw new Error('无法确认已进入且尚未选择行动的营地，请刷新后接管');
         }
-        const result = (await api('/dungeon/node/camp/leave', { method: 'POST' })).data;
-        if (!automatic) return result;
-        // 不依赖 GET 在休息期间是否结算回血；只以离营后服务器结果核对实际恢复量。
-        const settled = result?.dungeon_id ? result : await fetchCurrentDungeon();
-        if (!settled || settled.dungeon_id !== dungeon.dungeon_id) throw new Error('营地结算所属探索无法确认，已暂停');
-        const rows = campRecoveryRows(settled, policy);
-        const describe = row => `${row.name} HP ${row.hp}/${row.hpTarget}、AP ${row.ap}/${row.apTarget}`;
-        const missing = rows.filter(row => row.hp < row.hpTarget || row.ap < row.apTarget);
-        if (missing.length) throw new Error(`${policy.label}结算未达目标：${missing.map(describe).join('；')}。请检查理智惩罚或游戏恢复限制，已暂停后续推进`);
-        log(`${policy.label}已达到本次目标：${rows.map(describe).join('；')}`, 'success');
-        return settled;
+        runtime.phase = `${policy.label} · ${label}`; renderDashboard();
+        await api('/dungeon/node/camp/leave', { method: 'POST', body: { choice: policy.action },
+            expectedCamp: { enterTime: latest.camp_enter_time } });
+        // 成功后只回查，不重复发送行动；不再按旧的每秒恢复或百分比校验服务器结果。
+        current = await fetchCurrentDungeon(); latest = (await api('/dungeon/node')).data;
+        assertCamp(current, latest);
+        if (latest.completed !== true || latest.camp_choice !== policy.action) {
+            throw new ApiError('营地行动已提交，但结算结果未符合预期，请核对游戏后接管', 200, 0, '/dungeon/node/camp/leave', true);
+        }
+        const rewards = policy.action === 'search' ? fmtRewards(latest.camp_search_items) : '';
+        log(`${policy.label}：${label}完成${rewards ? ` · ${rewards}` : ''}${latest.camp_sanity_gain ? ` · 理智 +${latest.camp_sanity_gain}` : ''}`, 'success');
+        return current;
     }
 
     function nodeResolved(node) {
@@ -3041,7 +3009,7 @@
     wxtCard.appendChild(el('div', 'ah-sub', '刷目标开局在“策略 → 资源止损”开启，按所选难度重开。双贪缺少落雪金盏时，开启则按上限重开，关闭则暂停；霜藏缺失或目标不可选时暂停。营地沿用已保存设置，公开队伍等待满员。'));
     const hermitCard = card(dungeonSpecialPage, '旧日救援据点默认配置', 'shield');
     toggleSetting(hermitCard, 'hermitDefaults', '启用旧日专属配置');
-    hermitCard.appendChild(el('div', 'ah-note', '助战：@ldya → 1 号位，@Guqii0812 → 2 号位，自己 → 3 号位。商店购买全部 Buff / 符文和理智补给；普通营地跳过，Boss 前营地固定休息 100 秒。'));
+    hermitCard.appendChild(el('div', 'ah-note', '助战：@ldya → 1 号位，@Guqii0812 → 2 号位，自己 → 3 号位。商店购买全部 Buff / 符文和理智补给；营地沿用“策略 → 营地行动”：默认普通营地搜索、Boss 前修整。'));
     hermitCard.appendChild(el('div', 'ah-sub', '仅在旧日救援据点生效，关闭后使用通用配置。私密/仅好友队伍使用指定助战；公开队伍仍等待玩家满员。购买按库存与余额进行，不受单品上限和理智余量限制；“跳过商店”仍生效。'));
     const friendCard = card(dungeonTeamPage, '助战好友', 'shield', '私密/仅好友队伍最多优先选择 2 人，其余按等级补齐；望雪台火系保留原候补，双光使用指定账号，双贪使用此处勾选。公开队伍等待玩家加满 3 人后自动开始。');
     const friendActions = row(friendCard);
@@ -3203,15 +3171,13 @@
     numberSetting(tacticsFields, 'sanityFloor', '理智保留底线');
     selectSetting(tacticsFields, 'route', '分支偏好', [['first', '默认第一路线'], ['camp', '优先营地'], ['treasure', '优先宝箱材料'], ['boss', '优先首领捷径']]);
     tacticsCard.appendChild(el('div', 'ah-sub', '红叶山谷优先第二条战斗路线；其他副本使用上述分支偏好。'));
-    for (const [title, mode, seconds, target, description] of [
-        ['普通营地', 'campMode', 'campSeconds', 'campTarget', '用于沿途营地，以及无法确认后续路线的营地。保留原有恢复设置。'],
-        ['Boss 前营地', 'bossCampMode', 'bossCampSeconds', 'bossCampTarget', '下一场战斗为 Boss，且中间只有事件、商店或普通宝箱时使用；其他营地、分支或不明节点会中止识别。'],
+    for (const [title, key, description] of [
+        ['普通营地', 'campAction', '默认搜索宝箱。用于沿途营地，以及无法确认后续路线的营地。'],
+        ['Boss 前营地', 'bossCampAction', '默认修整。下一场战斗为 Boss，且中间只有事件、商店或普通宝箱时使用；其他营地、分支或不明节点会中止识别。'],
     ]) {
-        const restCard = card(sectionPage(ui.pages.settings, 'camp', '营地恢复'), title, 'heart', description), restFields = fields(restCard);
-        selectSetting(restFields, mode, '休息方式', [['auto', '按队伍状态'], ['fixed', '固定时长'], ['off', '直接离开']], true);
-        numberSetting(restFields, seconds, '固定休息 / 秒'); numberSetting(restFields, target, '恢复目标 / %');
-        for (const [key, name] of [[mode, '休息方式'], [seconds, '固定休息秒数'], [target, '恢复目标百分比']]) ui.controls[key].setAttribute('aria-label', `${title} · ${name}`);
-        restCard.appendChild(el('div', 'ah-sub', '自动模式按 HP/AP 目标等待并核对实际恢复；固定模式按秒数休息。游戏 AP 上限与低理智限制仍生效。'));
+        const restCard = card(sectionPage(ui.pages.settings, 'camp', '营地行动'), title, 'heart', description);
+        selectSetting(fields(restCard), key, `${title}行动`, [['search', '搜索 · 宝箱 / 理智'], ['rest', '修整 · 生命 / AP']], true);
+        restCard.appendChild(el('div', 'ah-sub', '进入营地立即回复 50% 生命，随后直接执行所选行动。搜索由每名玩家抽一次区域普通宝箱，无普通宝箱时改为回复理智；修整回满生命，AP 恢复至游戏中设置的修整 AP 值（留空为满 AP）。'));
     }
     const shopCard = card(sectionPage(ui.pages.settings, 'inventory', '商店保护'), '地下城商店购买', 'bag'); const shopFields = fields(shopCard);
     selectSetting(shopFields, 'shop', '购买范围', [['equip_skill', '副本推荐 / 理智补给 / 装备 / 技能'], ['all', '全部类别（旧副本仍排除符文）'], ['off', '跳过商店']], true);
@@ -3435,7 +3401,7 @@
         if (policy.visibility === 'public') ui.dungeonSummary.textContent += ' · 公开组队：等待满 3 人后自动开始';
         const preset = dungeonPreset({ preset_id: policy.dungeonPreset });
         const plannedDungeon = activeTaskContext?.dungeonId ? runtime.dungeon : { preset_id: policy.dungeonPreset };
-        if (hermitDefaultsEnabled(plannedDungeon, policy)) ui.dungeonSummary.textContent += ' · 旧日专属：ldya 1 号位 / Guqii0812 2 号位 · 全部 Buff 与理智 · 道中跳营地 / Boss 前 100s';
+        if (hermitDefaultsEnabled(plannedDungeon, policy)) ui.dungeonSummary.textContent += ' · 旧日专属：ldya 1 号位 / Guqii0812 2 号位 · 全部 Buff 与理智';
         const isWxt = WXT_PRESET_RE.test(dungeonName(plannedDungeon));
         ui.dungeonSummary.textContent += preset?.difficulty_by_event || isWxt
             ? ` · 事件难度目标：${isWxt ? policy.wxtDifficulty || policy.difficulty : policy.difficulty}` : ` · 难度：${policy.difficulty}`;
