@@ -46,6 +46,13 @@ async function main() {
             await fixture.clickTask('开始多角色任务');
             return JSON.stringify(fixture.plans)===JSON.stringify([['role-a',3],['角色乙',5],['角色乙',2]])&&h.runtime.ticketsUsed===10&&h.characterBatch.results[0].counters.ticketsUsed===3&&h.characterBatch.results[1].counters.ticketsUsed===7;
         `);
+        await test('日常免费副本按角色开关和配置执行', `
+            for(const [i,role] of fixture.characters.entries()){const key='aether-helper-v2:'+role.username;localStorage.setItem(key,JSON.stringify({...JSON.parse(localStorage.getItem(key)),dailyFreeDungeons:i===0,visibility:'friends',difficulty:'困难'}))}
+            const base=fixture.handler;fixture.handler=r=>r.path==='/dungeon/current'?{code:0,data:null}:base(r);
+            h.setDeps({runs:async(...args)=>{fixture.plans.push([h.ctx.character,...args]);return{wins:1}}});
+            await fixture.clickTask('开始多角色任务');
+            return JSON.stringify(fixture.plans)===JSON.stringify([['role-a','mine','friends','困难',1,true],['role-a','valley','friends','困难',1,true]])&&h.characterBatch.results.every(x=>x.outcome==='success');
+        `);
         await test('身份不匹配停止整批且不提交写请求', `const base=fixture.handler;fixture.handler=r=>r.path==='/status'?{code:0,data:{username:'wrong'}}:base(r);await fixture.clickTask('开始多角色任务');return h.runtime.outcome==='error'&&fixture.donated.length===0&&h.characterBatch.results[0].outcome==='error'&&h.characterBatch.results[1].outcome==='pending'`);
         await test('角色被解绑时停止整批', `fixture.characters=[];await fixture.clickTask('开始多角色任务');return h.runtime.outcome==='error'&&fixture.donated.length===0`);
         await test('日常普通错误记录警告后继续下一角色', `const base=fixture.handler;fixture.handler=r=>r.path.endsWith('/quest')&&r.query._aether_character==='role-a'?{code:400,http:400,message:'材料不足'}:base(r);await fixture.clickTask('开始多角色任务');return h.runtime.outcome==='partial'&&h.characterBatch.results[0].outcome==='partial'&&h.characterBatch.results[1].outcome==='success'&&fixture.donated.length===1`);

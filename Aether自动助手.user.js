@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.6.1
+// @version      2.6.2
 // @description  Aether 图形控制台：高收益日常、玩家赠送、地下城接管与探索、背包分解预览与有限强化；分级菜单、角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.6.1';
+    const VERSION = '2.6.2';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -48,7 +48,7 @@
     const preferredFriends = new Set(); // 「选助战好友」勾选的好友 username；空 = 招募时全自动按等级选
 
     const DEFAULT_SETTINGS = Object.freeze({
-        dailySweep: false, dailyShop: true, dailyDonation: true, dailyShopOverrides: {}, sweepTimes: 1, sweepPreset: '', dungeonPreset: '', runs: 1,
+        dailySweep: false, dailyFreeDungeons: false, dailyShop: true, dailyDonation: true, dailyShopOverrides: {}, sweepTimes: 1, sweepPreset: '', dungeonPreset: '', runs: 1,
         visibility: 'private', difficulty: '普通', sweepTicketBudget: 20,
         lossLimit: 1, restartLimit: 10, rerollWxt: false, wxtStrategy: 'fire', wxtDifficulty: '', campAction: 'search',
         shop: 'equip_skill', shopMaxEach: 1, bossCampAction: 'rest',
@@ -2514,6 +2514,10 @@
             if (!sweepPresetId) throw new Error('已开启日常扫荡，请先选择副本');
             steps.push(['地下城扫荡', () => doSweep(sweepPresetId, sweepTimes)]);
         }
+        if (taskSettings().dailyFreeDungeons) steps.push(['每日免费副本', () => {
+            const policy = taskSettings();
+            return doAllFreeDungeons(policy.visibility, policy.difficulty);
+        }]);
         steps.push(['补领活动奖励', () => doEvents(true)]);
         if (taskSettings().dailyShop) steps.push(['每日商店', doDailyShop]);
         if (taskSettings().dailyDonation) steps.push(['自动捐献', async () => {
@@ -2798,9 +2802,11 @@
 
     const dailyCard = card(sectionPage(ui.pages.daily, 'tasks', '日常任务'), '日常一条龙', 'bolt', '领取邮件、优先高收益每日挑战、完成活动并补领奖励，再执行下方勾选的商店、建筑捐献和玩家赠送计划。');
     toggleSetting(dailyCard, 'dailySweep', '一键日常包含扫荡');
+    toggleSetting(dailyCard, 'dailyFreeDungeons', '一键日常包含每日免费副本');
     toggleSetting(dailyCard, 'dailyShop', '一键日常包含每日商店');
     toggleSetting(dailyCard, 'dailyDonation', '一键日常包含建筑捐献');
     toggleSetting(dailyCard, 'dailyGift', '一键日常包含玩家赠送');
+    dailyCard.appendChild(el('div', 'ah-sub', '每日免费副本按探索中的难度与组队设置执行，每个当日可免费进入的副本一局。有未结束探索时跳过并提示；无免费额度时不新建探索。'));
     ui.dailySummary = el('div', 'ah-summary'); dailyCard.appendChild(ui.dailySummary);
     const dailyActions = row(dailyCard); dailyActions.style.marginTop = '12px';
     taskButton(dailyActions, '开始日常', 'play', '日常一条龙', () => doDailyAll(settings.sweepPreset, settings.sweepTimes, settings.dailySweep), 'primary ah-grow');
@@ -3439,6 +3445,7 @@
         const name = runtime.presets.find((p) => String(p.id) === String(policy.sweepPreset))?.name;
         summaryRows(ui.dailySummary, [
             ['扫荡', policy.dailySweep ? `${name || '尚未选择副本'} · 最多 ${policy.sweepTimes} 次 · 用券上限 ${policy.sweepTicketBudget} 张` : '未开启', !policy.dailySweep],
+            ['免费副本', policy.dailyFreeDungeons ? `每个免费副本一局 · 按探索难度与组队策略` : '未开启', !policy.dailyFreeDungeons],
             ['商店', policy.dailyShop ? '按所选商品范围购买' : '未开启', !policy.dailyShop],
             ['捐献', policy.dailyDonation ? '按保存的建筑材料执行，冷却时跳过' : '未开启', !policy.dailyDonation],
             ['赠送', policy.dailyGift ? `${policy.giftPlan?.entryUuid ? '@' + policy.giftPlan.targetUsername : '尚未保存计划'} · 冷却时跳过` : '未开启', !policy.dailyGift],
