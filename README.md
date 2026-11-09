@@ -23,7 +23,11 @@
    node tests/aether-config-import.cjs
    node tests/aether-battle-timeout.cjs
    node tests/aether-updates.cjs
+   node tests/aether-game-update.cjs
+   node tests/aether-ui-audit.cjs
    ```
+
+   可通过 `AETHER_UI_PORT` 指定独立浏览器调试端口。`node tests/aether-uncertain-recovery.cjs` 使用 Node VM 验证写请求结果不明时的恢复与停止，不需要浏览器。
 
 4. 将两个脚本、说明及相关测试一起提交并推送到本仓库 `main`。
 

@@ -236,7 +236,7 @@ function prepare() {
     return previewPath;
 }
 
-async function connect(port = 9247) {
+async function connect(port = Number(process.env.AETHER_UI_PORT || 9247)) {
     const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     const target = pages.find((p) => p.type === 'page'); assert.ok(target, 'Browser page required');
     const socket = new WebSocket(target.webSocketDebuggerUrl), pending = new Map(), errors = []; let id = 0;

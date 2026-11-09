@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Aether Console · 自动助手
 // @namespace    https://github.com/aether-auto-helper
-// @version      2.6.3
+// @version      2.6.4
 // @description  Aether 图形控制台：高收益日常、玩家赠送、地下城接管与探索、背包分解预览与有限强化；分级菜单、角色独立配置、任务取消和多标签互斥。
 // @author       -
 // @match        https://game.diving-fish.com/aether/*
@@ -14,7 +14,7 @@
 (function () {
     'use strict';
 
-    const VERSION = '2.6.3';
+    const VERSION = '2.6.4';
     const SCRIPT_IDENTITY = { name: 'Aether Console · 自动助手', namespace: 'https://github.com/aether-auto-helper' };
     // 与红叶镇相同：手动并行检查可信源，选最高版本，由脚本管理器确认安装。
     const UPDATE_SOURCES = [
@@ -386,7 +386,7 @@
         if (base === '/dungeon/node') {
             if (runtime.dungeon && Number.isFinite(response.sanity)) runtime.dungeon.sanity = response.sanity;
         }
-        if (base === '/dungeon/presets' && Array.isArray(response.data)) runtime.presets = response.data;
+        if (base === '/dungeon/presets') runtime.presets = validatePresetList(response.data);
         if (base.startsWith('/dungeon/') && response.data?.dungeon_id && response.data?.status) runtime.dungeon = response.data;
         renderDashboard();
     }
@@ -518,6 +518,19 @@
 #aether-auto-helper-panel .ah-btn{min-height:38px}#aether-auto-helper-panel .ah-stat small{white-space:nowrap}
 #aether-auto-helper-panel[data-outcome=running] .ah-status{color:var(--cyan)}
 #aether-auto-helper-panel[data-outcome=stopped] .ah-dot,#aether-auto-helper-panel[data-outcome=partial] .ah-dot{background:var(--orange)}
+#aether-auto-helper-panel .ah-stop-active{display:inline-flex;gap:5px;min-width:72px;min-height:44px;background:#fa929c12}
+#aether-auto-helper-panel .ah-task-notice{flex:none;margin:0 14px 10px;padding:9px 10px;border:1px solid #f7bd7750;border-radius:9px;background:#f7bd770a;color:var(--orange);font-size:11px;min-width:0}
+#aether-auto-helper-panel .ah-task-notice[data-kind=error]{border-color:#fa929c50;background:#fa929c0a;color:var(--red)}
+#aether-auto-helper-panel .ah-task-notice-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+#aether-auto-helper-panel .ah-task-notice-head strong{font-size:11px;min-width:0;overflow-wrap:anywhere}
+#aether-auto-helper-panel .ah-task-notice button{flex:none;border:0;background:transparent;color:inherit;padding:4px 2px;text-decoration:underline;min-height:28px;font-size:11px}
+#aether-auto-helper-panel .ah-task-notice-copy{max-height:6.6em;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;line-height:1.65;scrollbar-width:thin}
+#aether-auto-helper-panel.ah-collapsed .ah-task-notice{display:none}
+#aether-auto-helper-panel .ah-stat strong{overflow-wrap:anywhere}
+#aether-auto-helper-panel .ah-stat strong[data-long=true]{font-size:16px}
+#aether-auto-helper-panel .ah-actions-early{margin:0 0 10px}
+#aether-auto-helper-panel .ah-fields>.ah-actions-early{grid-column:1/-1;margin:0}
+@media(max-width:520px){#aether-auto-helper-panel .ah-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:360px){#aether-auto-helper-panel .ah-summary-row{grid-template-columns:56px minmax(0,1fr);gap:7px;padding:8px}#aether-auto-helper-panel .ah-btn{padding:9px 10px}#aether-auto-helper-panel .ah-stats{gap:5px}#aether-auto-helper-panel .ah-stat{padding:9px 5px}}
 @media(prefers-reduced-motion:reduce){#aether-auto-helper-panel *{transition:none!important}}
 `;
@@ -528,6 +541,7 @@
     const emblem = el('div', 'ah-emblem'); emblem.appendChild(icon('logo'));
     const brand = el('div', 'ah-brand'); brand.append(el('strong', '', 'AETHER'), el('span', 'ah-version', VERSION), el('small', '', '自动助手 / AUTOMATION'));
     const stopBtn = el('button', 'ah-icon-btn ah-stop'); stopBtn.appendChild(icon('stop')); stopBtn.title = '停止当前任务'; stopBtn.setAttribute('aria-label', stopBtn.title); stopBtn.disabled = true;
+    const stopText = el('span', '', '停止'); stopText.hidden = true; stopBtn.appendChild(stopText);
     const collapseBtn = el('button', 'ah-icon-btn'); collapseBtn.appendChild(icon('minus')); collapseBtn.setAttribute('aria-label', '收起助手');
     const updateBtn = el('button', 'ah-btn ah-update-btn', '检查更新');
     updateBtn.title = '检查新版本并打开油猴安装确认页';
@@ -537,12 +551,18 @@
     const statusLine = el('span', 'ah-status-text', '就绪'); statusLine.setAttribute('role', 'status');
     const characterLabel = el('span', 'ah-character', '未选择角色');
     statusBar.append(el('span', 'ah-dot'), statusLine, characterLabel);
+    const taskNotice = el('div', 'ah-task-notice'); taskNotice.hidden = true; taskNotice.setAttribute('role', 'status');
+    const taskNoticeHead = el('div', 'ah-task-notice-head'), taskNoticeTitle = el('strong');
+    const taskNoticeLogs = el('button', '', '查看日志'); taskNoticeLogs.onclick = () => openTab('logs');
+    const taskNoticeCopy = el('div', 'ah-task-notice-copy'); taskNoticeCopy.tabIndex = 0;
+    taskNoticeCopy.setAttribute('aria-label', '本次任务提示');
+    taskNoticeHead.append(taskNoticeTitle, taskNoticeLogs); taskNotice.append(taskNoticeHead, taskNoticeCopy);
     const tabs = el('div', 'ah-tabs'); tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '助手功能');
     const content = el('div', 'ah-content');
     const footer = el('div', 'ah-foot');
     const footerText = el('span', '', '状态尚未同步'); const timeLabel = el('span', 'ah-time', '00:00'); footer.append(footerText, timeLabel);
     const launcher = el('button', 'ah-launcher'); launcher.appendChild(icon('logo')); launcher.setAttribute('aria-label', '展开助手');
-    panel.append(header, statusBar, tabs, content, footer, launcher);
+    panel.append(header, statusBar, taskNotice, tabs, content, footer, launcher);
     let collapsed = readStorage('aether-helper-v2-collapsed', false) === true;
     let expandedPosition = null, launcherPosition = null;
     function constrainPanel() {
@@ -599,6 +619,8 @@
     }
     function setBusy(busy) {
         stopBtn.disabled = !busy;
+        stopBtn.classList.toggle('ah-stop-active', busy); stopText.hidden = !busy;
+        updateBtn.hidden = busy;
         for (const button of ui.taskButtons) button.disabled = busy;
         for (const control of Object.values(ui.controls)) control.disabled = busy;
         for (const control of panel.querySelectorAll('[data-lock-task]')) control.disabled = busy || control.dataset.protected === '1';
@@ -606,13 +628,25 @@
     function renderDashboard() {
         if (!ui.ready) return;
         panel.dataset.outcome = runtime.outcome;
-        statusLine.textContent = runningTask ? `${runningTask} · ${runtime.phase}` : runtime.phase;
+        const synced = !runningTask && runtime.task === '同步状态' && runtime.outcome === 'success';
+        statusLine.textContent = runningTask ? `${runningTask} · ${runtime.phase}` : synced ? '状态已同步' : runtime.phase;
+        statusLine.title = statusLine.textContent;
+        const noticeWasHidden = taskNotice.hidden;
+        const showIssue = !runningTask && ['error', 'partial'].includes(runtime.outcome);
+        const issues = showIssue ? runtime.logs.filter(record => record.at >= runtime.startedAt &&
+            (!runtime.endedAt || record.at <= runtime.endedAt) && ['warn', 'error'].includes(record.type) &&
+            !record.message.endsWith(`「${runtime.task}」处理结束，详情见日志`)) : [];
+        const issue = issues[0];
+        taskNotice.hidden = !showIssue;
+        taskNotice.dataset.kind = runtime.outcome;
+        taskNoticeTitle.textContent = runtime.outcome === 'error' ? '本次任务需要处理' : `本次任务有 ${runtime.issues || 1} 项需留意`;
+        taskNoticeCopy.textContent = issue?.message || '请查看日志，确认本次任务的执行结果。';
         characterLabel.textContent = activeTaskContext?.character || getCharacter() || '未选择角色';
         const elapsed = runtime.startedAt ? Math.max(0, ((runtime.endedAt || Date.now()) - runtime.startedAt) / 1000) : 0;
         timeLabel.textContent = formatDuration(elapsed);
         const waiting = Math.max(0, Math.ceil((runtime.waitUntil - Date.now()) / 1000));
-        ui.heroTitle.textContent = runningTask ? runtime.phase : ({ success: '本次任务已完成', partial: '处理结束，请查看日志', stopped: '任务已停止', error: '任务暂停，等待处理' }[runtime.outcome] || '准备好下一场探索');
-        ui.heroMeta.textContent = runningTask ? `${runtime.task} · 已运行 ${formatDuration(elapsed)}` : '日常、探索与装备管理，在这里安排。';
+        ui.heroTitle.textContent = runningTask ? runtime.phase : synced ? '状态已同步' : ({ success: '本次任务已完成', partial: '处理结束，请查看日志', stopped: '任务已停止', error: '任务暂停，等待处理' }[runtime.outcome] || '准备好下一场探索');
+        ui.heroMeta.textContent = runningTask ? `${runtime.task} · 已运行 ${formatDuration(elapsed)}` : synced ? '已读取当前角色与探索状态；自动任务需手动启动。' : '日常、探索与装备管理，在这里安排。';
         const dungeon = runtime.dungeon;
         const sanity = Number.isFinite(dungeon?.sanity) && dungeon.status === 'exploring' ? dungeon.sanity : null;
         ui.ring.style.setProperty('--value', sanity == null ? 0 : Math.max(0, Math.min(100, sanity * 5)));
@@ -625,8 +659,11 @@
         ui.progress.parentElement.setAttribute('aria-valuetext', runtime.total ? `${runtime.progress} / ${runtime.total}` : '等待任务开始');
         ui.progressLabel.textContent = runtime.total ? `任务进度 ${runtime.progress} / ${runtime.total}` : '等待任务开始';
         ui.waitLabel.textContent = waiting ? `等待 ${formatDuration(waiting)}` : runtime.task || '手动启动';
-        [runtime.wins, runtime.losses, runtime.ticketsUsed, runtime.shopSpent].forEach((n, i) => { ui.stats[i].textContent = String(n); });
+        [runtime.wins, runtime.losses, runtime.ticketsUsed, runtime.shopSpent].forEach((n, i) => {
+            const value = String(n); ui.stats[i].textContent = value; ui.stats[i].title = value; ui.stats[i].dataset.long = String(value.length > 9);
+        });
         renderExploration(dungeon); renderPolicySummary();
+        if (noticeWasHidden !== taskNotice.hidden) constrainPanel();
     }
     function formatDuration(value) {
         const sec = Math.max(0, Math.floor(value));
@@ -989,6 +1026,15 @@
             await waitSeconds(Math.min(remain > 0 ? remain + 1 : 2, budget, 30));
         }
     }
+    async function recoverWriteState(error, read) {
+        rethrowIfStopped(error, true);
+        try { return await read(); }
+        catch (readError) {
+            rethrowIfStopped(readError); // 停止、身份失效优先于原写入错误。
+            // 回查失败不能把未知写入降为普通读取错误，否则日常/角色队列会继续消费。
+            throw error?.uncertain ? error : readError;
+        }
+    }
     async function executeBattle(entryId, label) {
         if (!entryId) throw new Error(`${label}：缺少战斗编号`);
         let state = await setupBattleLineup(entryId, label);
@@ -996,8 +1042,8 @@
             if (state?.can_start !== true) throw new Error(`${label}：编队未满足开始条件`);
             try { await api(`/battle/${entryId}/start`, { method: 'POST' }); }
             catch (e) {
-                rethrowIfStopped(e, true); // start 响应丢失可先回查，不能重发。
-                state = (await api(`/battle/${entryId}`)).data;
+                // start 响应丢失可先回查，不能重发；回查失败仍保留写入不确定状态。
+                state = await recoverWriteState(e, async () => (await api(`/battle/${entryId}`)).data);
                 if (!state?.result && !['ongoing', 'completed'].includes(state?.status)) throw e;
                 log(`${label}：开始响应异常，已回查确认战斗启动`, 'warn');
             }
@@ -1009,8 +1055,8 @@
     async function completeDaily(battleId) {
         try { return await api(`/daily/${battleId}/complete`, { method: 'POST' }); }
         catch (e) {
-            rethrowIfStopped(e, true);
-            const current = ((await api('/daily')).data?.battles || []).find((b) => b.battle_id === battleId);
+            const current = await recoverWriteState(e, async () =>
+                ((await api('/daily')).data?.battles || []).find((b) => b.battle_id === battleId));
             if (current && ['completed', 'failed'].includes(current.status)) return { data: current };
             throw e;
         }
@@ -1096,29 +1142,53 @@
     }
 
     // ---------- 预设列表（扫荡与挂机共用） ----------
+    function validatePresetList(list) {
+        if (!Array.isArray(list) || list.some(p => !p || typeof p !== 'object' ||
+            !(typeof p.id === 'string' && p.id.trim() || Number.isSafeInteger(p.id) && p.id >= 0)) ||
+            new Set(list.map(p => String(p.id))).size !== list.length) {
+            throw new Error('副本列表格式异常，请重新同步；已保存的选择保持不变');
+        }
+        return list;
+    }
     async function loadPresets() {
-        const list = (await api('/dungeon/presets')).data || [];
+        const list = validatePresetList((await api('/dungeon/presets')).data);
         return list.filter((p) => !p.locked);
     }
     const dungeonPreset = (dungeon) => runtime.presets.find((p) => String(p.id) === String(dungeon?.preset_id));
     const dungeonName = (dungeon) => dungeon?.preset_name || dungeonPreset(dungeon)?.name || '';
     function fillPresetSelect(select, presets, sweep = false) {
-        const previous = select.value || (sweep ? settings.sweepPreset : settings.dungeonPreset);
+        const previous = String((sweep ? settings.sweepPreset : settings.dungeonPreset) || '');
         select.replaceChildren(new Option(sweep ? '选择扫荡副本…' : '选择探索副本…', ''));
         for (const p of presets) {
             if (sweep && (!p.sweep_supported || !p.sweep_unlocked)) continue;
             const opt = new Option(`${p.name || p.id}${p.daily_free_available ? ' · 免费' : ''}`, String(p.id));
             select.appendChild(opt);
         }
-        if ([...select.options].some((o) => o.value === previous)) select.value = previous;
+        if (previous && ![...select.options].some(o => o.value === previous)) {
+            const saved = runtime.presets.find(p => String(p.id) === previous);
+            const unavailable = new Option(`${saved?.name || previous} · 暂不可用`, previous);
+            unavailable.disabled = true;
+            select.appendChild(unavailable);
+        }
+        select.value = previous;
     }
 
     // ---------- 4. 地下城扫荡 ----------
     async function fetchSweepInfo(presetId) {
         return (await api(`/dungeon/sweep/info?preset_id=${encodeURIComponent(presetId)}`)).data || {};
     }
+    function sweepEntryCost(info) {
+        const entry = info.entry_item_cost;
+        if (entry == null) return null;
+        const numeric = typeof entry.amount === 'number' || typeof entry.amount === 'string' && entry.amount.trim() !== '';
+        const amount = numeric ? Number(entry.amount) : NaN;
+        if (typeof entry !== 'object' || Array.isArray(entry) || typeof entry.id !== 'string' || !entry.id.trim() ||
+            !Number.isSafeInteger(amount) || amount < 0) throw new Error('扫荡门票报价异常，请重新查询后再执行');
+        return amount > 0 ? { id: entry.id, name: entry.name || entry.id, amount } : null;
+    }
     // 默认限制单次请求；计划总次数允许分批，但仍受票券、每日额度和任务总上限限制。
     function clampSweepTimes(info, want, perRequest = true, ticketBudget = Math.max(0, taskSettings().sweepTicketBudget - runtime.ticketsUsed)) {
+        sweepEntryCost(info); // 门票库存不在报价中；次数仍以服务器上限为准，仅校验已声明的消耗。
         if (info.max_times == null || !Number.isFinite(Number(info.max_times))) throw new Error('扫荡信息缺少有效上限，请刷新后重试');
         const numeric = value => typeof value === 'number' || typeof value === 'string' && value.trim() !== '';
         const ticketCost = numeric(info.ticket_cost) ? Number(info.ticket_cost) : NaN;
@@ -1141,8 +1211,8 @@
         if (info.unlocked === false) throw new Error('该副本尚未解锁扫荡');
         const target = clampSweepTimes(info, times, false);
         if (target <= 0) throw new Error('没有可用扫荡次数，请检查用券预算、加速券库存和每日额度');
-        const quotedCost = Number(info.ticket_cost);
-        log(`计划扫荡 ${target} 次 · 预计加速券 ${target * natural(info.ticket_cost)} 张 · 按服务器单次上限分批`, 'info');
+        const quotedCost = Number(info.ticket_cost), quotedEntry = sweepEntryCost(info);
+        log(`计划扫荡 ${target} 次 · 预计加速券 ${target * natural(info.ticket_cost)} 张${quotedEntry ? ` · 预计门票 ${quotedEntry.name} ×${target * quotedEntry.amount}` : ''} · 按服务器单次上限分批`, 'info');
         let done = 0;
         setProgress(0, target, '准备扫荡');
         while (done < target) {
@@ -1150,9 +1220,13 @@
             if (done > 0) info = await fetchSweepInfo(presetId);
             if (info.unlocked === false) { markIssue('扫荡解锁状态已变化，停止后续批次'); break; }
             if (Number(info.ticket_cost) > quotedCost) { markIssue('每次扫荡用券报价已上涨，停止后续批次，请重新查询额度'); break; }
+            const entry = sweepEntryCost(info);
+            if (entry && (!quotedEntry || entry.id !== quotedEntry.id || entry.amount > quotedEntry.amount)) {
+                markIssue('扫荡门票种类或每次消耗已变化，停止后续批次，请重新查询额度'); break;
+            }
             const n = clampSweepTimes(info, target - done);
             if (n <= 0) { markIssue('扫荡用券预算、库存或每日额度不足，停止后续批次'); break; }
-            setProgress(done, target, `扫荡第 ${done + 1}–${done + n} 次 · 预计用券 ${n * Number(info.ticket_cost)} 张`);
+            setProgress(done, target, `扫荡第 ${done + 1}–${done + n} 次 · 预计用券 ${n * Number(info.ticket_cost)} 张${entry ? ` · 门票 ${entry.name} ×${n * entry.amount}` : ''}`);
             const r = (await api('/dungeon/sweep', { method: 'POST', body: { preset_id: presetId, times: n } })).data;
             if (!Number.isInteger(r?.times) || r.times < 0 || r.times > n) throw new ApiError('扫荡已提交但返回次数异常，请刷新游戏核对结果', 200, 0, '/dungeon/sweep', true);
             const spent = r.cost?.ticket_cost;
@@ -1465,17 +1539,17 @@
                     phase = 'ongoing';
                     remaining = Number(battle.remaining_seconds ?? 0);
                 } catch (e) {
-                    rethrowIfStopped(e, true);
                     // start 响应丢失时，以节点的服务端状态判定是否已经成功启动。
                     let refreshed;
                     try {
-                        refreshed = (await api('/dungeon/node')).data;
+                        refreshed = await recoverWriteState(e, async () => (await api('/dungeon/node')).data);
                     } catch (refreshError) {
                         rethrowIfStopped(refreshError);
                         throw new Error(`${label}：start 失败且无法回查状态（${e.message}）`);
                     }
                     const refreshedPhase = refreshed?.battle_status?.status || '';
                     if (!['ongoing', 'completed'].includes(refreshedPhase)) {
+                        if (e.uncertain) throw e;
                         throw new Error(`${label}：战斗无法开始（${e.message}；status=${refreshedPhase || '?' }）`);
                     }
                     phase = refreshedPhase;
@@ -2889,7 +2963,7 @@
     ui.dailySummary = el('div', 'ah-summary'); dailyCard.appendChild(ui.dailySummary);
     const dailyActions = row(dailyCard); dailyActions.style.marginTop = '12px';
     taskButton(dailyActions, '开始日常', 'play', '日常一条龙', () => doDailyAll(settings.sweepPreset, settings.sweepTimes, settings.dailySweep), 'primary ah-grow');
-    dailyCard.insertBefore(dailyActions, ui.dailySummary); dailyActions.style.marginTop = '0'; dailyActions.style.marginBottom = '12px';
+    dailyCard.insertBefore(dailyActions, dailyCard.children[1]); dailyActions.style.marginTop = '0'; dailyActions.classList.add('ah-actions-early');
     const quick = row(dailyCard); quick.style.marginTop = '8px';
     taskButton(quick, '邮件', null, '邮件领取', doMail); taskButton(quick, '每日战斗', null, '每日战斗', doDaily); taskButton(quick, '活动', null, '活动处理', () => doEvents());
     const dailyShopCard = card(sectionPage(ui.pages.daily, 'shop', '每日商店'), '每日商店', 'bag', '默认购买除雷渊晶石以外的所有商品，按今日剩余限购和实际余额购买。材料兑换商品也包含在内，可逐项取消勾选。');
@@ -3063,8 +3137,9 @@
         if (!settings.sweepPreset) throw new Error('请先选择扫荡副本');
         const info = await fetchSweepInfo(settings.sweepPreset);
         const n = clampSweepTimes(info, settings.sweepTimes, false, settings.sweepTicketBudget);
+        const entry = sweepEntryCost(info);
         ui.sweepQuoteKey = JSON.stringify([getCharacter(), settings.sweepPreset, settings.sweepTimes, settings.sweepTicketBudget]);
-        ui.sweepInfo.textContent = `上次查询 ${new Date().toLocaleTimeString()} · 单次请求上限 ${info.max_times} 次 · 今日剩余 ${info.daily_remaining} 次 · 加速券 ${info.ticket_owned} 张 · 每次 ${info.ticket_cost} 张${info.entry_item_cost?.id ? ` · 每次门票 ${info.entry_item_cost.amount}` : ''}。本次计划 ${n} 次，预计用券 ${n * Number(info.ticket_cost)}/${settings.sweepTicketBudget} 张（最多 ${CONFIG.sweepMaxTimes} 次，自动分批；每批重新核对）。`;
+        ui.sweepInfo.textContent = `上次查询 ${new Date().toLocaleTimeString()} · 单次请求上限 ${info.max_times} 次 · 今日剩余 ${info.daily_remaining} 次 · 加速券 ${info.ticket_owned} 张 · 每次 ${info.ticket_cost} 张${entry ? ` · ${entry.name} 每次 ${entry.amount} 件` : ''}。本次计划 ${n} 次，预计用券 ${n * Number(info.ticket_cost)}/${settings.sweepTicketBudget} 张${entry ? ` · 预计门票 ${entry.name} ×${n * entry.amount}` : ''}（最多 ${CONFIG.sweepMaxTimes} 次，自动分批；每批重新核对）。`;
     });
     taskButton(sweepActions, '执行扫荡', 'play', '地下城扫荡', () => doSweep(settings.sweepPreset, settings.sweepTimes), 'primary');
     const plotCard = card(sectionPage(ui.pages.daily, 'plot', '剧情'), '剧情推进', 'log', '按章节顺序执行战斗和剧情脚本。要求胜利的战斗失败后停止。');
@@ -3084,7 +3159,7 @@
     const dungeonActions = row(dungeonCard); dungeonActions.style.marginTop = '12px';
     taskButton(dungeonActions, '接管当前', 'refresh', '接管探索', resumeDungeon);
     taskButton(dungeonActions, '开始探索', 'play', '地下城探索', () => doDungeonRuns(settings.dungeonPreset, settings.visibility, settings.difficulty, settings.runs), 'primary ah-grow');
-    dungeonCard.insertBefore(dungeonActions, ui.dungeonSummary); dungeonActions.style.marginTop = '0'; dungeonActions.style.marginBottom = '12px';
+    dungeonFields.insertBefore(dungeonActions, dungeonPresetSel.parentElement.nextSibling); dungeonActions.style.marginTop = '0'; dungeonActions.classList.add('ah-actions-early');
     const dungeonExtra = row(dungeonCard); dungeonExtra.style.marginTop = '8px';
     taskButton(dungeonExtra, '刷全部免费', null, '免费探索全刷', () => doAllFreeDungeons(settings.visibility, settings.difficulty));
     taskButton(dungeonExtra, '刷新副本', null, '刷新副本', refreshPresets);
@@ -3554,7 +3629,7 @@
     }
     function applyPresets(list) {
         fillPresetSelect(sweepPresetSel, list, true); fillPresetSelect(dungeonPresetSel, list);
-        setSetting('sweepPreset', sweepPresetSel.value); setSetting('dungeonPreset', dungeonPresetSel.value); renderPolicySummary();
+        renderPolicySummary();
     }
     async function refreshPresets() { applyPresets(await loadPresets()); }
     async function refreshAll() {

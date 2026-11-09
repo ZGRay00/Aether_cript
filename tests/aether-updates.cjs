@@ -1,5 +1,22 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { prepare, connect } = require('./aether-v2-ui.cjs');
+
+const script = fs.readFileSync(path.join(__dirname, '..', 'Aether自动助手.user.js'), 'utf8');
+const currentVersion = script.match(/^\/\/\s*@version\s+(\S+)/m)?.[1];
+assert.match(currentVersion || '', /^\d+\.\d+\.\d+$/, 'Main script must declare a numeric release version');
+const [major, minor, patch] = currentVersion.split('.').map(Number);
+const versionAtPatch = value => `${major}.${minor}.${value}`;
+const olderVersion = patch > 0 ? versionAtPatch(patch - 1)
+    : minor > 0 ? `${major}.${minor - 1}.0` : `${Math.max(0, major - 1)}.0.0`;
+// Keep a lexical-order trap (for example 9 versus 30) above the current patch.
+const numericBoundary = 10 ** Math.max(1, String(patch + 1).length);
+const versionFixtures = {
+    current: currentVersion, next: versionAtPatch(patch + 1), older: olderVersion,
+    prerelease: `${currentVersion}-beta.1`,
+    numericLower: versionAtPatch(numericBoundary - 1), numericHigher: versionAtPatch(numericBoundary * 3),
+};
 
 async function main() {
     prepare();
@@ -8,7 +25,8 @@ async function main() {
     async function test(name, code) {
         await c.reset();
         await c.evaluate(`
-            window.updateTest = { requests: [], opened: [], closed: 0, blocked: false, versions: ['2.6.3','2.6.3','2.6.3'], pinnedVersion:'2.6.3', sha:'a'.repeat(40) };
+            window.updateVersions = ${JSON.stringify(versionFixtures)};
+            window.updateTest = { requests: [], opened: [], closed: 0, blocked: false, versions: Array(3).fill(updateVersions.current), pinnedVersion:updateVersions.current, sha:'a'.repeat(40) };
             window.updateButton = [...document.querySelectorAll('button')].find(b=>b.textContent==='检查更新');
             window.open = () => updateTest.blocked ? null : {
                 document: {title:'',body:{textContent:''}}, close:()=>updateTest.closed++,
@@ -41,15 +59,15 @@ async function main() {
                 updateTest.requests.length===7 && updateTest.requests.every(r=>r.credentials==='omit' && r.cache==='no-store' && r.url.includes('ZGRay00/Aether_cript') && (r.url.includes('aether-auto-helper.user.js')||r.url.includes('/git/ref/heads/main')));
         `);
         await test('并行比较所有源并选数字版本最高者', `
-            updateTest.versions=['2.6.0','2.6.9','2.6.30'];await updateButton.onclick();
+            updateTest.versions=[updateVersions.older,updateVersions.numericLower,updateVersions.numericHigher];await updateButton.onclick();
             return updateTest.opened.length===1 && updateTest.opened[0].startsWith('https://raw.githubusercontent.com/') && updateTest.requests.length===7;
         `);
         await test('单源失败仍能通过可用源更新', `
-            updateTest.failFirst=true;updateTest.versions=['2.6.3','2.6.4','2.6.3'];await updateButton.onclick();
+            updateTest.failFirst=true;updateTest.versions=[updateVersions.current,updateVersions.next,updateVersions.current];await updateButton.onclick();
             return updateTest.opened.length===1 && updateTest.opened[0].startsWith('https://fastly.jsdelivr.net/');
         `);
         await test('旧版本和预发布版本不覆盖正式版', `
-            updateTest.versions=['2.0.18','2.6.0-beta.1','2.6.0'];await updateButton.onclick();
+            updateTest.versions=[updateVersions.older,updateVersions.prerelease,updateVersions.older];await updateButton.onclick();
             return updateButton.textContent==='已是最新' && !updateTest.opened.length;
         `);
         await test('身份不匹配拒绝安装', `
@@ -63,8 +81,8 @@ async function main() {
             updateTest.failAll=false;updateTest.requests=[];await updateButton.onclick();return updateButton.textContent==='已是最新';
         `);
         await test('弹窗拦截保留安装按钮并可再次打开', `
-            updateTest.blocked=true;updateTest.versions.fill('2.6.4');await updateButton.onclick();
-            if(updateButton.textContent!=='安装 v2.6.4')return false;
+            updateTest.blocked=true;updateTest.versions.fill(updateVersions.next);await updateButton.onclick();
+            if(updateButton.textContent!=='安装 v'+updateVersions.next)return false;
             updateTest.blocked=false;await updateButton.onclick();return updateTest.opened.length===1 && updateTest.requests.length===7;
         `);
         await test('检查期间按钮禁用，完成后恢复且保留角色配置', `
@@ -74,14 +92,14 @@ async function main() {
             return disabled && !updateButton.disabled && JSON.stringify(h.settings)===before;
         `);
         await test('分支CDN全部陈旧仍通过最新提交固定地址升级', `
-            updateTest.versions.fill('2.1.2');updateTest.pinnedVersion='2.6.4';await updateButton.onclick();
-            return updateTest.opened.length===1&&updateTest.opened[0].includes('@'+updateTest.sha+'/')&&updateButton.textContent==='安装 v2.6.4';
+            updateTest.versions.fill(updateVersions.older);updateTest.pinnedVersion=updateVersions.next;await updateButton.onclick();
+            return updateTest.opened.length===1&&updateTest.opened[0].includes('@'+updateTest.sha+'/')&&updateButton.textContent==='安装 v'+updateVersions.next;
         `);
         await test('同版本优先固定提交安装地址', `
-            updateTest.versions.fill('2.6.4');updateTest.pinnedVersion='2.6.4';await updateButton.onclick();return updateTest.opened[0].includes('@'+updateTest.sha+'/');
+            updateTest.versions.fill(updateVersions.next);updateTest.pinnedVersion=updateVersions.next;await updateButton.onclick();return updateTest.opened[0].includes('@'+updateTest.sha+'/');
         `);
         await test('API不可用且分支缓存陈旧时不声称最新', `
-            updateTest.apiFail=true;updateTest.versions.fill('2.1.2');await updateButton.onclick();
+            updateTest.apiFail=true;updateTest.versions.fill(updateVersions.older);await updateButton.onclick();
             return updateButton.textContent==='暂未发现更新'&&!updateTest.opened.length&&h.runtime.logs.some(x=>x.message.includes('GitHub 最新提交 检查失败'));
         `);
         await test('API限流时明确提示无法确认最新', `
@@ -91,13 +109,13 @@ async function main() {
             updateTest.sha='invalid';await updateButton.onclick();return updateTest.requests.length===4&&updateButton.textContent==='暂未发现更新'&&!updateTest.opened.length;
         `);
         await test('固定CDN不可用时使用同提交Raw', `
-            updateTest.failPinnedCdn=true;updateTest.pinnedVersion='2.6.4';await updateButton.onclick();return updateTest.opened[0].startsWith('https://raw.githubusercontent.com/')&&updateTest.opened[0].includes('/'+updateTest.sha+'/');
+            updateTest.failPinnedCdn=true;updateTest.pinnedVersion=updateVersions.next;await updateButton.onclick();return updateTest.opened[0].startsWith('https://raw.githubusercontent.com/')&&updateTest.opened[0].includes('/'+updateTest.sha+'/');
         `);
         await test('固定文件全失败仍可通过分支Raw发现新版', `
-            updateTest.failPinned=true;updateTest.versions[2]='2.6.4';await updateButton.onclick();return updateTest.opened[0].startsWith('https://raw.githubusercontent.com/')&&h.runtime.logs.some(x=>x.message.includes('固定版本文件均不可访问'));
+            updateTest.failPinned=true;updateTest.versions[2]=updateVersions.next;await updateButton.onclick();return updateTest.opened[0].startsWith('https://raw.githubusercontent.com/')&&h.runtime.logs.some(x=>x.message.includes('固定版本文件均不可访问'));
         `);
         await test('固定提交返回版本冲突时不据此确认最新', `
-            updateTest.pinnedVersions=['2.1.2','2.6.3','2.6.3'];await updateButton.onclick();return updateButton.textContent==='暂未发现更新'&&h.runtime.logs.some(x=>x.message.includes('版本不一致'));
+            updateTest.pinnedVersions=[updateVersions.older,updateVersions.current,updateVersions.current];await updateButton.onclick();return updateButton.textContent==='暂未发现更新'&&h.runtime.logs.some(x=>x.message.includes('版本不一致'));
         `);
         console.log('Complete:', count, 'update checks');
     } finally { c.close(); }
